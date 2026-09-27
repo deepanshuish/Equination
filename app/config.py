@@ -11,7 +11,17 @@ DB_PATH = DATA_DIR / "equination.db"
 STATIC_DIR = BASE_DIR / "static"
 
 HOST = os.environ.get("EQUINATION_HOST", "127.0.0.1")
-PORT = int(os.environ.get("EQUINATION_PORT", "8000"))
+# Hosting platforms (Railway, Render, Fly) inject PORT; honour it when set.
+PORT = int(os.environ.get("EQUINATION_PORT") or os.environ.get("PORT") or "8000")
+
+# When set, every page and API call requires HTTP Basic auth with this password
+# (any username). Required if you expose the app beyond localhost - it stores
+# your Upstox secret and token.
+PASSWORD = os.environ.get("EQUINATION_PASSWORD", "")
+
+# Public base URL, used to build the default OAuth redirect URI when deployed
+# (e.g. https://equination.fly.dev). Falls back to the local host/port.
+PUBLIC_URL = os.environ.get("EQUINATION_PUBLIC_URL", "").rstrip("/") or f"http://{HOST}:{PORT}"
 
 UPSTOX_API_BASE = "https://api.upstox.com"
 UPSTOX_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
@@ -28,7 +38,7 @@ HISTORY_DAYS = int(os.environ.get("EQUINATION_HISTORY_DAYS", str(365 * 6)))
 DEFAULT_SETTINGS: dict[str, str] = {
     "api_key": "",
     "api_secret": "",
-    "redirect_uri": f"http://{HOST}:{PORT}/callback",
+    "redirect_uri": f"{PUBLIC_URL}/callback",
     "access_token": "",
     "token_issued_at": "",
     "universe": "curated",  # curated | nse_all

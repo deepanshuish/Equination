@@ -1,17 +1,19 @@
 """FastAPI application: JSON API + static single-page UI."""
 from __future__ import annotations
 
+import base64
 import logging
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db, scheduler
 from .backtest import run_backtest
-from .config import NIFTY_KEY, STATIC_DIR
+from .config import NIFTY_KEY, PASSWORD, STATIC_DIR
 from .scanner import refresh_instruments, start_scan_async, state
 from .strategy import StrategyParams
 from .universe import select_universe
@@ -37,6 +39,23 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Equination", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def basic_auth(request: Request, call_next):
+    """Optional password gate for deployed instances (EQUINATION_PASSWORD)."""
+    if PASSWORD and not request.url.path.startswith("/static"):
+        header = request.headers.get("authorization", "")
+        ok = False
+        if header.startswith("Basic "):
+            try:
+                _, _, pw = base64.b64decode(header[6:]).decode().partition(":")
+                ok = secrets.compare_digest(pw, PASSWORD)
+            except (ValueError, UnicodeDecodeError):
+                ok = False
+        if not ok:
+            return Response("Authentication required", 401, headers={"WWW-Authenticate": 'Basic realm="Equination"'})
+    return await call_next(request)
 
 
 def _public_settings() -> dict:

@@ -1,0 +1,21 @@
+# fly.io deployment:  fly launch --copy-config --no-deploy && fly volumes create equination_data -s 1 && fly secrets set EQUINATION_PASSWORD=... && fly deploy
+app = "equination"
+primary_region = "bom"
+
+[build]
+
+[env]
+  EQUINATION_HOST = "0.0.0.0"
+  EQUINATION_PORT = "8000"
+  EQUINATION_DATA_DIR = "/data"
+
+[[mounts]]
+  source = "equination_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false   # the daily scheduler must stay alive
+  auto_start_machines = true
+  min_machines_running = 1

@@ -52,13 +52,42 @@ what the Nifty regime filter and volatility scaling are there to blunt.
 Run the backtest on your own data before trusting it; past performance does
 not guarantee future results.
 
+## Deploying (not Vercel)
+
+Equination is a long-running server: it keeps a SQLite database on disk,
+runs multi-minute scans in a background thread and hosts its own daily
+scheduler. **Serverless platforms such as Vercel or Netlify cannot run it**
+(read-only filesystem, short timeouts, no background jobs → `FUNCTION_INVOCATION_FAILED`).
+
+Run it on your own PC, or on any host with a persistent disk using the
+included `Dockerfile`:
+
+| Host | Notes |
+|---|---|
+| Your PC | `python run.py`; keep it on at scan time |
+| Fly.io | `fly launch --copy-config --no-deploy`, `fly volumes create equination_data -s 1 -r bom`, `fly secrets set EQUINATION_PASSWORD=… EQUINATION_PUBLIC_URL=https://<app>.fly.dev`, `fly deploy` |
+| Railway | New project from repo, add a **Volume** mounted at `/data`, set the env vars below |
+| Any VPS | `docker build -t equination . && docker run -d -p 8000:8000 -v equination:/data -e EQUINATION_PASSWORD=… equination` |
+
+When deployed, set these and register `EQUINATION_PUBLIC_URL/callback` as the
+redirect URL of your Upstox app:
+
+- `EQUINATION_PASSWORD` — **required** once the app is reachable from the
+  internet; it stores your Upstox secret and token. The browser will prompt for
+  it (any username).
+- `EQUINATION_PUBLIC_URL` — e.g. `https://equination.fly.dev`; sets the default
+  OAuth redirect URI.
+- `EQUINATION_DATA_DIR=/data` — the mounted volume (already set in the Dockerfile).
+
 ## Configuration
 
 Environment variables (all optional):
 
 | Var | Default | Meaning |
 |---|---|---|
-| `EQUINATION_HOST` / `EQUINATION_PORT` | `127.0.0.1` / `8000` | Bind address; keep it local, the secret is stored in plain SQLite |
+| `EQUINATION_HOST` / `EQUINATION_PORT` | `127.0.0.1` / `8000` | Bind address (`PORT` from the host is honoured too) |
+| `EQUINATION_PASSWORD` | unset | HTTP Basic-auth password for every page and API call |
+| `EQUINATION_PUBLIC_URL` | `http://host:port` | Base URL used for the default OAuth redirect URI |
 | `EQUINATION_DATA_DIR` | `./data` | Where the SQLite database lives |
 | `EQUINATION_RPS` | `1.1` | Requests per second to Upstox (their 2000 / 30 min cap is the binding one) |
 | `EQUINATION_HISTORY_DAYS` | `2190` | Days of history to download on first run |
