@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Equination</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Equination <span class="sub">momentum picks for NSE, powered by your Upstox data</span></div>
+  <nav>
+    <button data-tab="dashboard" class="active">Dashboard</button>
+    <button data-tab="backtest">Backtest</button>
+    <button data-tab="history">History</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="strategy">Strategy</button>
+  </nav>
+</header>
+
+<main>
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ============================================================ dashboard -->
+  <section id="tab-dashboard" class="tab active">
+    <div class="row space">
+      <div>
+        <h1>Today's picks</h1>
+        <div id="scan-meta" class="muted">No scan yet.</div>
+      </div>
+      <div class="actions">
+        <button id="btn-scan" class="primary">Run scan now</button>
+      </div>
+    </div>
+
+    <div id="progress" class="progress hidden">
+      <div class="bar"><div id="progress-fill"></div></div>
+      <div id="progress-text" class="muted"></div>
+    </div>
+
+    <div id="regime" class="regime hidden"></div>
+
+    <div id="needs-login" class="callout warn hidden">
+      Your Upstox access token is missing or expired (tokens expire every morning at 3:30 IST).
+      <a href="#" data-goto="settings">Open Settings</a> to log in, then run the scan again.
+    </div>
+
+    <div class="table-wrap">
+      <table id="picks" class="picks">
+        <thead>
+          <tr>
+            <th>#</th><th>Symbol</th><th class="num">Close</th><th class="num">Score</th>
+            <th class="num" title="12-month return excluding the most recent month">12-1m</th>
+            <th class="num">6m</th><th class="num">3m</th><th class="num">1m</th>
+            <th class="num" title="Annualised volatility">Vol</th>
+            <th class="num" title="Distance from 52-week high">vs 52w hi</th>
+            <th class="num">Stop</th><th class="num">Qty</th><th class="num">Value</th><th class="num">Risk</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="stats" class="muted small"></div>
+    <p class="muted small">
+      Positional system: review daily, act only when a stop is hit or at the monthly rebalance.
+      Quantity uses your capital, risk-per-trade and the regime allocation. Educational tool, not investment advice.
+    </p>
+  </section>
+
+  <!-- ============================================================= backtest -->
+  <section id="tab-backtest" class="tab">
+    <div class="row space">
+      <div>
+        <h1>Backtest</h1>
+        <div class="muted">Monthly rebalance of the same rules on the candles cached from Upstox, 0.25% cost per switch.</div>
+      </div>
+      <button id="btn-backtest" class="primary">Run backtest</button>
+    </div>
+    <div id="bt-out" class="muted">Run a scan first so there is data to test on.</div>
+  </section>
+
+  <!-- ============================================================== history -->
+  <section id="tab-history" class="tab">
+    <h1>Scan history</h1>
+    <div class="table-wrap">
+      <table class="plain">
+        <thead><tr><th>Run</th><th>Status</th><th>Regime</th><th>Message</th><th></th></tr></thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+    <div id="history-detail"></div>
+  </section>
+
+  <!-- ============================================================= settings -->
+  <section id="tab-settings" class="tab">
+    <h1>Settings</h1>
+    <div class="grid2">
+      <div class="card">
+        <h2>Upstox connection</h2>
+        <p class="muted small">Create an app at <code>account.upstox.com/developer/apps</code> and set its redirect URL
+          to exactly the value below. The secret is stored only in the local SQLite database.</p>
+        <label>API key <input id="s-api_key" autocomplete="off"></label>
+        <label>API secret <input id="s-api_secret" type="password" autocomplete="off" placeholder="(unchanged)"></label>
+        <label>Redirect URI <input id="s-redirect_uri"></label>
+        <div class="row">
+          <button id="btn-save-conn">Save</button>
+          <a id="btn-login" class="button primary" href="/login">Login with Upstox</a>
+        </div>
+        <div id="token-state" class="muted small"></div>
+        <details>
+          <summary>Paste an access token instead</summary>
+          <label>Access token <input id="s-token" type="password" autocomplete="off"></label>
+          <button id="btn-token">Verify &amp; save token</button>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2>Strategy &amp; schedule</h2>
+        <label>Universe
+          <select id="s-universe">
+            <option value="curated">Curated large &amp; mid caps (~200, fast)</option>
+            <option value="nse_all">All NSE equities (~2000, first refresh ~30 min)</option>
+          </select>
+        </label>
+        <label>Capital (₹) <input id="s-capital" type="number" min="1000" step="1000"></label>
+        <label>Risk per trade (% of capital) <input id="s-risk_per_trade_pct" type="number" min="0.1" max="5" step="0.1"></label>
+        <label>Number of picks <input id="s-top_n" type="number" min="3" max="30" step="1"></label>
+        <label>Minimum price (₹) <input id="s-min_price" type="number" min="1" step="1"></label>
+        <label>Minimum 20-day avg turnover (₹ crore) <input id="s-min_turnover_cr" type="number" min="0" step="0.5"></label>
+        <label>Daily scan time (IST, Mon-Fri) <input id="s-schedule_time" placeholder="18:30"></label>
+        <label class="inline"><input id="s-schedule_enabled" type="checkbox"> Scan automatically every trading day</label>
+        <div class="row"><button id="btn-save-strat">Save</button><span id="schedule-state" class="muted small"></span></div>
+      </div>
+    </div>
+    <div id="data-state" class="muted small"></div>
+  </section>
+
+  <!-- ============================================================= strategy -->
+  <section id="tab-strategy" class="tab">
+    <h1>How the picks are chosen</h1>
+    <div class="card prose">
+      <h2>Trend-filtered, volatility-adjusted momentum rotation</h2>
+      <p>Positional equity strategy aiming for a realistic <strong>1-3% per month on average</strong>, with some
+        losing months. It never trades intraday and no orders are placed by this app.</p>
+      <h3>1. Market regime (Nifty 50)</h3>
+      <ul>
+        <li><strong>RISK ON</strong>: Nifty above its 50 and 200-day averages: full allocation.</li>
+        <li><strong>CAUTION</strong>: above 200-day, below 50-day: half allocation.</li>
+        <li><strong>RISK OFF</strong>: below 200-day: no new buys. Momentum's worst losses happen in bear markets.</li>
+      </ul>
+      <h3>2. Eligibility filters</h3>
+      <ul>
+        <li>At least 260 daily bars, price above the minimum, 20-day average turnover above the minimum.</li>
+        <li>Stock above its own 50 and 200-day averages and within 25% of its 52-week high.</li>
+        <li>Annualised volatility below 60%; last-month return below 35% (avoids buying blow-off tops).</li>
+      </ul>
+      <h3>3. Ranking</h3>
+      <p><code>score = (0.40 × R<sub>12-1</sub> + 0.35 × R<sub>6</sub> + 0.25 × R<sub>3</sub>) / volatility<sub>63d</sub></code>.
+        R<sub>12-1</sub> is the 12-month return skipping the latest month, the classic academic definition that
+        sidesteps short-term mean reversion. Dividing by volatility prefers smooth trends.</p>
+      <h3>4. Position sizing and exits</h3>
+      <ul>
+        <li>Stop-loss at 2.5 × ATR(14) below the close. Quantity = min(risk budget ÷ distance to stop, equal-weight slot).</li>
+        <li>Exit when a close is below the stop or the 50-day average, or when the stock drops out of the top 2N at the
+          monthly review. Replace with the highest-ranked name you do not hold.</li>
+        <li>Rebalance monthly; check daily only for stop hits. Expect 2-6 trades a month with 10 positions.</li>
+      </ul>
+      <h3>Why this one</h3>
+      <p>Momentum is the most persistent return anomaly documented across markets, including India, and it stacks well
+        with trend filters. Its weakness, sharp drawdowns during regime changes, is exactly what the Nifty filter and
+        volatility scaling address. Run the backtest on your own downloaded data before trusting it, and remember that
+        past performance does not guarantee future results.</p>
+    </div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
