@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import secrets
 from contextlib import asynccontextmanager
@@ -11,7 +12,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, scheduler
+from . import db, fundamentals as fnd, scheduler, swing
 from .backtest import run_backtest
 from .config import NIFTY_KEY, PASSWORD, STATIC_DIR
 from .scanner import refresh_instruments, start_scan_async, state
@@ -25,7 +26,8 @@ log = logging.getLogger("equination")
 SECRET_KEYS = {"api_secret", "access_token"}
 EDITABLE_KEYS = {
     "api_key", "api_secret", "redirect_uri", "universe", "capital", "risk_per_trade_pct", "top_n",
-    "min_price", "min_turnover_cr", "schedule_time", "schedule_enabled",
+    "min_price", "min_turnover_cr", "schedule_time", "schedule_enabled", "mode", "hold_days",
+    "require_fundamentals", "exclude_symbols",
 }
 
 
@@ -95,12 +97,14 @@ def save_settings(body: SettingsIn):
             assert 0 <= int(hh) < 24 and 0 <= int(mm) < 60
         except (ValueError, AssertionError):
             raise HTTPException(400, "schedule_time must be HH:MM")
-    for k in ("capital", "risk_per_trade_pct", "top_n", "min_price", "min_turnover_cr"):
+    for k in ("capital", "risk_per_trade_pct", "top_n", "min_price", "min_turnover_cr", "hold_days"):
         if k in vals:
             try:
                 float(vals[k])
             except ValueError:
                 raise HTTPException(400, f"{k} must be a number")
+    if vals.get("mode") not in (None, "swing", "positional"):
+        raise HTTPException(400, "mode must be swing or positional")
     db.set_settings(vals)
     scheduler.apply_schedule()
     return _public_settings()
@@ -194,7 +198,6 @@ def scan_detail(scan_id: int):
 @app.post("/api/backtest")
 def backtest():
     settings = db.get_settings()
-    params = StrategyParams.from_settings(settings)
     instruments = db.get_instruments()
     universe, _ = select_universe(instruments, settings["universe"])
     keys = universe["instrument_key"].tolist()
@@ -204,7 +207,34 @@ def backtest():
     nifty = candles[candles["instrument_key"] == NIFTY_KEY].set_index("date")["close"]
     if nifty.empty:
         return {"error": "No Nifty history cached yet - run a scan first."}
-    return run_backtest(candles[candles["instrument_key"] != NIFTY_KEY], nifty, params)
+    stocks = candles[candles["instrument_key"] != NIFTY_KEY]
+    mode = settings.get("mode", "swing")
+    if mode == "swing":
+        res = swing.backtest(stocks, nifty, swing.SwingParams.from_settings(settings))
+    else:
+        res = run_backtest(stocks, nifty, StrategyParams.from_settings(settings))
+    res["mode"] = mode
+    return res
+
+
+@app.get("/api/fundamentals/{symbol}")
+def fundamentals_debug(symbol: str, refresh: bool = False):
+    """Normalised fundamentals plus the raw Upstox payload, for checking the field mapping."""
+    inst = db.get_instruments()
+    row = inst[inst["symbol"].str.upper() == symbol.upper()]
+    if row.empty:
+        raise HTTPException(404, "symbol not in the cached instrument master - run a scan first")
+    isin, name = row.iloc[0]["isin"], row.iloc[0]["name"]
+    token = db.get_settings().get("access_token", "")
+    try:
+        f = fnd.fetch(isin, token, name or "") if (refresh or fnd.get_cached(isin) is None) and token else fnd.get_cached(isin)
+    except AuthError as e:
+        raise HTTPException(401, str(e))
+    if f is None:
+        raise HTTPException(404, "no cached fundamentals and no access token to fetch them")
+    raw = db.load_fundamentals(isin) or {}
+    return {"symbol": symbol.upper(), "isin": isin, "fundamentals": f.to_dict(),
+            "assessment": fnd.assess(f, fnd.QualityParams()), "raw": json.loads(raw["raw"]) if raw.get("raw") else None}
 
 
 # ------------------------------------------------------------------ status

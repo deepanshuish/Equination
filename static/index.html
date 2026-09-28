@@ -8,7 +8,7 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand">Equination <span class="sub">momentum picks for NSE, powered by your Upstox data</span></div>
+  <div class="brand">Equination <span class="sub">daily NSE swing &amp; momentum picks, powered by your Upstox data</span></div>
   <nav>
     <button data-tab="dashboard" class="active">Dashboard</button>
     <button data-tab="backtest">Backtest</button>
@@ -47,24 +47,12 @@
 
     <div class="table-wrap">
       <table id="picks" class="picks">
-        <thead>
-          <tr>
-            <th>#</th><th>Symbol</th><th class="num">Close</th><th class="num">Score</th>
-            <th class="num" title="12-month return excluding the most recent month">12-1m</th>
-            <th class="num">6m</th><th class="num">3m</th><th class="num">1m</th>
-            <th class="num" title="Annualised volatility">Vol</th>
-            <th class="num" title="Distance from 52-week high">vs 52w hi</th>
-            <th class="num">Stop</th><th class="num">Qty</th><th class="num">Value</th><th class="num">Risk</th>
-          </tr>
-        </thead>
+        <thead></thead>
         <tbody></tbody>
       </table>
     </div>
     <div id="stats" class="muted small"></div>
-    <p class="muted small">
-      Positional system: review daily, act only when a stop is hit or at the monthly rebalance.
-      Quantity uses your capital, risk-per-trade and the regime allocation. Educational tool, not investment advice.
-    </p>
+    <p id="mode-note" class="muted small"></p>
   </section>
 
   <!-- ============================================================= backtest -->
@@ -72,7 +60,7 @@
     <div class="row space">
       <div>
         <h1>Backtest</h1>
-        <div class="muted">Monthly rebalance of the same rules on the candles cached from Upstox, 0.25% cost per switch.</div>
+        <div class="muted" id="bt-desc">Replays the current mode's rules on the candles cached from Upstox.</div>
       </div>
       <button id="btn-backtest" class="primary">Run backtest</button>
     </div>
@@ -116,6 +104,15 @@
 
       <div class="card">
         <h2>Strategy &amp; schedule</h2>
+        <label>Mode
+          <select id="s-mode">
+            <option value="swing">4-day swing: quality pullback + reversal candle</option>
+            <option value="positional">Positional: monthly momentum rotation</option>
+          </select>
+        </label>
+        <label>Holding period for swing trades (trading days) <input id="s-hold_days" type="number" min="1" max="15" step="1"></label>
+        <label class="inline"><input id="s-require_fundamentals" type="checkbox"> Exclude stocks where Upstox has no fundamentals data</label>
+        <label>Never suggest these symbols (comma separated) <input id="s-exclude_symbols" placeholder="e.g. PAYTM, YESBANK"></label>
         <label>Universe
           <select id="s-universe">
             <option value="curated">Curated large &amp; mid caps (~200, fast)</option>
@@ -139,7 +136,43 @@
   <section id="tab-strategy" class="tab">
     <h1>How the picks are chosen</h1>
     <div class="card prose">
-      <h2>Trend-filtered, volatility-adjusted momentum rotation</h2>
+      <h2>Mode 1 — 4-day swing: quality pullback + reversal candle</h2>
+      <p>Finds fundamentally sound stocks in an uptrend that have just pulled back for a few days and printed a bullish
+        reversal candle. Historically this is the short-horizon setup with the best documented odds; the Backtest tab
+        measures those odds on your own data. Every pick comes with an entry, stop, target and a "hold until" date.</p>
+      <h3>1. Quality gate (Upstox key ratios)</h3>
+      <ul>
+        <li>Return on equity ≥ 10%, positive earnings (P/E &gt; 0 and &lt; 80), positive net margin.</li>
+        <li>Debt/equity ≤ 1.5 (skipped for banks, NBFCs and insurers, where leverage is the business).</li>
+        <li>Missing data is flagged as "unverified"; tick the setting to exclude such stocks entirely.</li>
+      </ul>
+      <h3>2. Promoter gate (Upstox shareholding pattern)</h3>
+      <ul>
+        <li><strong>Excluded</strong>: promoters cut their stake by ≥ 1.5 percentage points over the last two quarters,
+          or pledged holdings &gt; 15% where reported.</li>
+        <li><strong>Flagged</strong>: promoter holding below 25%; promoters adding is shown as a positive.</li>
+        <li>Your own exclude list in Settings always wins.</li>
+      </ul>
+      <h3>3. Technical setup</h3>
+      <ul>
+        <li><strong>Uptrend</strong>: 50 DMA above 200 DMA, price above 200 DMA and within 5% of or above the 50 DMA, positive 6-month return.</li>
+        <li><strong>Pullback</strong>: 3–12% below the 20-day high and RSI(2) dipped under 25 within the last 3 sessions.</li>
+        <li><strong>Trigger candle today</strong>: morning star, bullish engulfing, piercing line, hammer, bullish harami,
+          or a strong close (green, top quarter of range, above yesterday's high, volume ≥ 1.2× average).</li>
+        <li><strong>Sanity</strong>: ATR between 1% and 5% of price, liquid, not up more than 25% in the last month.</li>
+        <li><strong>Regime</strong>: Nifty 50 above its 200-day average, otherwise quantities go to zero.</li>
+      </ul>
+      <h3>4. Ranking and trade plan</h3>
+      <p>Score = 35% trend quality (6-month return ÷ volatility) + 20% pullback depth + 30% candle strength + 15% volume.
+        Stop = just under the pattern's low (max 2.5 ATR). Target = the 10-day high, or 2× the risk if that is closer.
+        Exit at the stop, the target, or the close of the last holding day, whichever comes first.</p>
+      <h3>What to expect</h3>
+      <p>Short-horizon setups are a numbers game: a good result is a 58–65% win rate with winners a bit larger than
+        losers, which compounds to the 1–3% a month you are targeting only if you take the trades consistently and
+        respect the stops. No fundamental or promoter check can see the next quarterly result or a surprise
+        announcement — the stop is what protects you from those.</p>
+
+      <h2 style="margin-top:28px">Mode 2 — Positional: trend-filtered, volatility-adjusted momentum rotation</h2>
       <p>Positional equity strategy aiming for a realistic <strong>1-3% per month on average</strong>, with some
         losing months. It never trades intraday and no orders are placed by this app.</p>
       <h3>1. Market regime (Nifty 50)</h3>
@@ -168,8 +201,9 @@
       <h3>Why this one</h3>
       <p>Momentum is the most persistent return anomaly documented across markets, including India, and it stacks well
         with trend filters. Its weakness, sharp drawdowns during regime changes, is exactly what the Nifty filter and
-        volatility scaling address. Run the backtest on your own downloaded data before trusting it, and remember that
-        past performance does not guarantee future results.</p>
+        volatility scaling address. The same fundamentals and promoter gates are applied to the shortlist before the
+        final ranking. Run the backtest on your own downloaded data before trusting it, and remember that past
+        performance does not guarantee future results.</p>
     </div>
   </section>
 </main>

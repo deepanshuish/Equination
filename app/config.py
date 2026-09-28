@@ -42,6 +42,10 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "access_token": "",
     "token_issued_at": "",
     "universe": "curated",  # curated | nse_all
+    "mode": "swing",  # swing (4-day) | positional (monthly momentum)
+    "hold_days": "4",
+    "require_fundamentals": "0",
+    "exclude_symbols": "",  # comma-separated symbols you never want suggested
     "capital": "500000",
     "risk_per_trade_pct": "1.0",
     "top_n": "10",

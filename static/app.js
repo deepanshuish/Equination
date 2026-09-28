@@ -30,12 +30,61 @@
   document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) { e.preventDefault(); showTab(g.dataset.goto); } });
 
   // ------------------------------------------------------------- dashboard
+  const PATTERN_LABEL = { morning_star: 'Morning star', bullish_engulfing: 'Bullish engulfing', piercing: 'Piercing line', hammer: 'Hammer', bullish_harami: 'Bullish harami', strong_close: 'Strong close' };
+  function fundCell(r) {
+    const bits = [];
+    if (r.roe != null) bits.push(`ROE ${fmt(r.roe)}%`);
+    if (r.pe != null) bits.push(`P/E ${fmt(r.pe)}`);
+    if (r.debt_equity != null) bits.push(`D/E ${fmt(r.debt_equity, 2)}`);
+    if (r.eps_growth != null) bits.push(`EPS g ${fmt(r.eps_growth, 0)}%`);
+    return bits.length ? bits.join(' · ') : '<span class="muted">n/a</span>';
+  }
+  function promoterCell(r) {
+    if (r.promoter_pct == null) return '<span class="muted">n/a</span>';
+    let s = `${fmt(r.promoter_pct)}%`;
+    if (r.promoter_change_pp != null) s += ` (${pct(r.promoter_change_pp)} pp)`;
+    if (r.pledge_pct != null && r.pledge_pct > 0) s += ` · pledged ${fmt(r.pledge_pct, 0)}%`;
+    return s;
+  }
+  function flagsCell(r) {
+    const f = r.quality_flags || [];
+    return f.length ? f.map((x) => `<span class="flag">${esc(x)}</span>`).join(' ') : '<span class="pos">✓</span>';
+  }
+  const SWING_HEAD = `<tr><th>#</th><th>Symbol</th><th>Setup</th><th class="num">Score</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th><th class="num" title="Reward to risk">R:R</th><th>Hold until</th><th class="num">Qty</th><th class="num">Value</th><th class="num">Risk</th><th>Fundamentals</th><th>Promoters</th><th>Flags</th></tr>`;
+  const POS_HEAD = `<tr><th>#</th><th>Symbol</th><th class="num">Close</th><th class="num">Score</th><th class="num" title="12-month return excluding the most recent month">12-1m</th><th class="num">6m</th><th class="num">3m</th><th class="num">1m</th><th class="num" title="Annualised volatility">Vol</th><th class="num" title="Distance from 52-week high">vs 52w hi</th><th class="num">Stop</th><th class="num">Qty</th><th class="num">Value</th><th class="num">Risk</th><th>Fundamentals</th><th>Promoters</th><th>Flags</th></tr>`;
+
+  function swingRow(r) {
+    const setup = (r.patterns || []).map((p) => PATTERN_LABEL[p] || p).join(', ');
+    return `<tr>
+      <td>${r.rank}</td>
+      <td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td>
+      <td><div>${esc(setup)}</div><small class="muted">pullback ${fmt(r.pullback_pct)}% · RSI2 ${fmt(r.rsi2_prev, 0)}→${fmt(r.rsi2, 0)} · vol ${fmt(r.vol_ratio)}× · 6m ${r.ret_6 >= 0 ? '+' : ''}${fmt(r.ret_6)}%</small></td>
+      <td class="num">${fmt(r.score, 0)}</td>
+      <td class="num">${fmt(r.entry, 2)}</td><td class="num neg">${fmt(r.stop_loss, 2)}</td><td class="num pos">${fmt(r.target, 2)}</td>
+      <td class="num">${fmt(r.reward_risk)}</td><td>${r.hold_until || '-'}</td>
+      <td class="num">${r.quantity}</td><td class="num">${inr(r.position_value)}</td><td class="num">${inr(r.risk_amount)}</td>
+      <td class="small">${fundCell(r)}</td><td class="small">${promoterCell(r)}</td><td class="small">${flagsCell(r)}</td>
+    </tr>`;
+  }
+  function positionalRow(r) {
+    return `<tr>
+      <td>${r.rank}</td>
+      <td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td>
+      <td class="num">${fmt(r.close, 2)}</td><td class="num">${fmt(r.score, 2)}</td>
+      <td class="num">${pct(r.ret_12_1)}</td><td class="num">${pct(r.ret_6)}</td><td class="num">${pct(r.ret_3)}</td><td class="num">${pct(r.ret_1)}</td>
+      <td class="num">${fmt(r.vol)}%</td><td class="num">${pct(r.from_high)}</td>
+      <td class="num">${fmt(r.stop_loss, 2)}</td><td class="num">${r.quantity}</td><td class="num">${inr(r.position_value)}</td><td class="num">${inr(r.risk_amount)}</td>
+      <td class="small">${fundCell(r)}</td><td class="small">${promoterCell(r)}</td><td class="small">${flagsCell(r)}</td>
+    </tr>`;
+  }
+
   function renderScan(scan) {
     const tb = $('#picks tbody');
     $('#needs-login').classList.toggle('hidden', scan.status !== 'needs_login');
     if (!scan || scan.status === 'none') { $('#scan-meta').textContent = 'No scan yet. Configure Upstox in Settings, then run a scan.'; tb.innerHTML = ''; return; }
+    const mode = scan.stats?.mode || scan.params?.mode || 'positional';
     const when = new Date(scan.run_at).toLocaleString('en-IN');
-    $('#scan-meta').textContent = `Last scan ${when} (${scan.status}) — ${scan.message || ''}` + (scan.stats?.data_as_of ? ` Data as of ${scan.stats.data_as_of}.` : '');
+    $('#scan-meta').textContent = `Last scan ${when} (${scan.status}, ${mode} mode) — ${scan.message || ''}` + (scan.stats?.data_as_of ? ` Data as of ${scan.stats.data_as_of}.` : '');
     const rg = scan.regime || {};
     const rEl = $('#regime');
     if (rg.state) {
@@ -44,19 +93,19 @@
         (rg.nifty_close ? `<span class="muted small">Nifty ${fmt(rg.nifty_close, 0)} · 50DMA ${fmt(rg.sma50, 0)} · 200DMA ${fmt(rg.sma200, 0)} · allocation ${Math.round(rg.allocation * 100)}%</span>` : '');
       rEl.classList.remove('hidden');
     } else rEl.classList.add('hidden');
-    tb.innerHTML = (scan.results || []).map((r) => `<tr>
-      <td>${r.rank}</td>
-      <td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td>
-      <td class="num">${fmt(r.close, 2)}</td><td class="num">${fmt(r.score, 2)}</td>
-      <td class="num">${pct(r.ret_12_1)}</td><td class="num">${pct(r.ret_6)}</td><td class="num">${pct(r.ret_3)}</td><td class="num">${pct(r.ret_1)}</td>
-      <td class="num">${fmt(r.vol)}%</td><td class="num">${pct(r.from_high)}</td>
-      <td class="num">${fmt(r.stop_loss, 2)}</td><td class="num">${r.quantity}</td><td class="num">${inr(r.position_value)}</td><td class="num">${inr(r.risk_amount)}</td>
-    </tr>`).join('') || '<tr><td colspan="14" class="muted">No eligible stocks in this scan.</td></tr>';
+    $('#picks thead').innerHTML = mode === 'swing' ? SWING_HEAD : POS_HEAD;
+    const rows = scan.results || [];
+    tb.innerHTML = rows.map(mode === 'swing' ? swingRow : positionalRow).join('') ||
+      `<tr><td colspan="17" class="muted">${mode === 'swing' ? 'No valid setups today — that is normal; pullback-reversal setups appear on a handful of days a month. Nothing to buy.' : 'No eligible stocks in this scan.'}</td></tr>`;
     const st = scan.stats || {};
     const reasons = Object.entries(st.excluded_reasons || {}).map(([k, v]) => `${k}: ${v}`).join(' · ');
-    $('#stats').innerHTML = st.universe ? `Universe ${st.universe}, eligible ${st.eligible}. Exclusions — ${esc(reasons)}` +
-      (st.fetch_errors ? ` · ${st.fetch_errors} symbols failed to download` : '') +
+    const gate = Object.entries(st.gate_reasons || {}).map(([k, v]) => `${k}: ${v}`).join(' · ');
+    $('#stats').innerHTML = st.universe ? `Universe ${st.universe}, ${mode === 'swing' ? `setups ${st.setups}` : `eligible ${st.eligible}`}, verified ${st.verified ?? 0}, removed by fundamentals/promoter gate ${st.gated_out ?? 0}${gate ? ` (${esc(gate)})` : ''}. Technical exclusions — ${esc(reasons)}` +
+      (st.fetch_errors ? ` · ${st.fetch_errors} data errors` : '') +
       (st.missing_symbols?.length ? ` · not found in instrument master: ${st.missing_symbols.join(', ')}` : '') : '';
+    $('#mode-note').textContent = mode === 'swing'
+      ? 'Swing mode: buy at the next open, place the stop immediately, sell at the target or the stop, otherwise at the close of the "hold until" day. Quantity uses your capital, risk-per-trade and the regime allocation. Educational tool, not investment advice.'
+      : 'Positional mode: review daily, act only when a stop is hit or at the monthly rebalance. Quantity uses your capital, risk-per-trade and the regime allocation. Educational tool, not investment advice.';
   }
 
   async function loadLatest() { try { renderScan(await api('/api/scan/latest')); } catch (e) { toast(e.message, true); } }
@@ -102,11 +151,32 @@
       <text x="${W - R - 4}" y="${T + 26}" fill="#8b94a7" font-size="11" text-anchor="end">nifty 50</text>
     </svg>`;
   }
+  function renderSwingBacktest(r) {
+    const edge = r.baseline_avg_return_pct != null ? (r.avg_return_pct - r.baseline_avg_return_pct).toFixed(2) : null;
+    return `<div class="muted small">${r.period.from} → ${r.period.to} · ${r.trades} setups · ${r.params.hold_days}-day max hold · ${r.params.cost_pct_round_trip}% round-trip cost · fundamentals gate not applied (no history)</div>
+      <div class="metrics">
+        ${metric('Win rate', r.win_rate_pct + '%', r.baseline_win_rate_pct != null ? `random entry ${r.baseline_win_rate_pct}%` : '')}
+        ${metric('Avg return / trade', fmt(r.avg_return_pct, 2) + '%', r.baseline_avg_return_pct != null ? `random entry ${fmt(r.baseline_avg_return_pct, 2)}% (edge ${edge >= 0 ? '+' : ''}${edge})` : '')}
+        ${metric('Avg win / loss', `${fmt(r.avg_win_pct, 2)}% / ${fmt(r.avg_loss_pct, 2)}%`, `median ${fmt(r.median_return_pct, 2)}%`)}
+        ${metric('Profit factor', r.profit_factor ?? '-', 'gross wins ÷ gross losses')}
+        ${metric('Avg days held', fmt(r.avg_days_held), '')}
+        ${metric('Exits', Object.entries(r.by_exit).map(([k, v]) => `${k} ${v.trades}`).join(' · '), Object.entries(r.by_exit).map(([k, v]) => `${k} ${fmt(v.avg_ret_pct, 2)}%`).join(' · '))}
+      </div>
+      <h3>By year</h3>
+      <div class="table-wrap"><table class="plain"><thead><tr><th>Year</th><th class="num">Setups</th><th class="num">Win rate</th><th class="num">Avg return</th></tr></thead><tbody>
+      ${r.by_year.map((y) => `<tr><td>${y.year}</td><td class="num">${y.trades}</td><td class="num">${y.win_rate_pct}%</td><td class="num">${pct(y.avg_ret_pct)}</td></tr>`).join('')}</tbody></table></div>
+      ${r.top_score_bucket?.length ? `<h3>By score bucket</h3><div class="table-wrap"><table class="plain"><thead><tr><th>Score</th><th class="num">Setups</th><th class="num">Win rate</th><th class="num">Avg return</th></tr></thead><tbody>
+      ${r.top_score_bucket.map((b) => `<tr><td>${b.bucket}</td><td class="num">${b.trades}</td><td class="num">${b.win_rate_pct}%</td><td class="num">${pct(b.avg_ret_pct)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      <details><summary>Most recent 30 setups</summary><div class="table-wrap"><table class="plain"><thead><tr><th>Date</th><th>Symbol</th><th>Exit</th><th class="num">Days</th><th class="num">Return</th></tr></thead><tbody>
+      ${r.recent_trades.map((t) => `<tr><td>${t.date}</td><td>${esc(t.symbol.split('|')[1] || t.symbol)}</td><td>${t.exit}</td><td class="num">${t.days}</td><td class="num">${pct(t.ret)}</td></tr>`).join('')}</tbody></table></div></details>
+      <p class="muted small">"Random entry" = every stock that passed the trend and sanity filters, bought on every day, held the same number of days. The difference is the value the pullback + candle trigger adds.</p>`;
+  }
   $('#btn-backtest').addEventListener('click', async () => {
     const out = $('#bt-out'); out.textContent = 'Running…'; $('#btn-backtest').disabled = true;
     try {
       const r = await api('/api/backtest', { method: 'POST' });
       if (r.error) { out.textContent = r.error; return; }
+      if (r.mode === 'swing') { out.innerHTML = renderSwingBacktest(r); return; }
       const s = r.strategy, n = r.nifty;
       out.innerHTML = `<div class="muted small">${r.period.from} → ${r.period.to}, ${s.months} months, avg turnover ${r.avg_monthly_turnover_pct}% of positions per month</div>
         <div class="metrics">
@@ -139,11 +209,15 @@
   });
 
   // -------------------------------------------------------------- settings
-  const FIELDS = ['api_key', 'redirect_uri', 'universe', 'capital', 'risk_per_trade_pct', 'top_n', 'min_price', 'min_turnover_cr', 'schedule_time'];
+  const FIELDS = ['api_key', 'redirect_uri', 'universe', 'mode', 'hold_days', 'exclude_symbols', 'capital', 'risk_per_trade_pct', 'top_n', 'min_price', 'min_turnover_cr', 'schedule_time'];
   async function loadSettings() {
     const s = await api('/api/settings');
     FIELDS.forEach((k) => { $('#s-' + k).value = s[k] ?? ''; });
     $('#s-schedule_enabled').checked = s.schedule_enabled === '1';
+    $('#s-require_fundamentals').checked = s.require_fundamentals === '1';
+    $('#bt-desc').textContent = s.mode === 'swing'
+      ? 'Replays every historical pullback + reversal-candle setup on the cached candles with the same stop, target and holding period, and compares it with buying the same stocks on random days.'
+      : 'Monthly rebalance of the momentum rules on the cached candles, 0.25% cost per switch, versus the Nifty 50.';
     $('#s-api_secret').placeholder = s.has_api_secret ? '(saved — leave blank to keep)' : 'paste your API secret';
     const ist = (d) => new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' IST';
     $('#token-state').textContent = s.has_access_token ? `Access token saved${s.token_issued_at ? ' ' + ist(s.token_issued_at) : ''}. Upstox tokens expire at 3:30 IST daily; log in again when a scan reports "needs login".` : 'No access token yet — save your key and secret, then click Login with Upstox.';
@@ -159,8 +233,9 @@
   });
   $('#btn-save-strat').addEventListener('click', async () => {
     const values = {};
-    ['universe', 'capital', 'risk_per_trade_pct', 'top_n', 'min_price', 'min_turnover_cr', 'schedule_time'].forEach((k) => { values[k] = $('#s-' + k).value.trim(); });
+    ['universe', 'mode', 'hold_days', 'exclude_symbols', 'capital', 'risk_per_trade_pct', 'top_n', 'min_price', 'min_turnover_cr', 'schedule_time'].forEach((k) => { values[k] = $('#s-' + k).value.trim(); });
     values.schedule_enabled = $('#s-schedule_enabled').checked ? '1' : '0';
+    values.require_fundamentals = $('#s-require_fundamentals').checked ? '1' : '0';
     try { await api('/api/settings', { method: 'POST', body: JSON.stringify({ values }) }); toast('Strategy settings saved'); loadSettings(); }
     catch (e) { toast(e.message, true); }
   });

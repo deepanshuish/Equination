@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS candles (
     open REAL, high REAL, low REAL, close REAL, volume REAL,
     PRIMARY KEY (instrument_key, date)
 );
+CREATE TABLE IF NOT EXISTS fundamentals (
+    isin TEXT PRIMARY KEY,
+    fetched_at TEXT NOT NULL,
+    data TEXT NOT NULL,
+    raw TEXT
+);
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at TEXT NOT NULL,
@@ -167,6 +173,22 @@ def candle_counts() -> dict[str, int]:
     with get_conn() as conn:
         rows = conn.execute("SELECT instrument_key, COUNT(*) AS n FROM candles GROUP BY instrument_key").fetchall()
     return {r["instrument_key"]: r["n"] for r in rows}
+
+
+# ------------------------------------------------------------ fundamentals
+def save_fundamentals(isin: str, data: dict, raw: dict | None) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO fundamentals(isin, fetched_at, data, raw) VALUES (?,?,?,?) "
+            "ON CONFLICT(isin) DO UPDATE SET fetched_at=excluded.fetched_at, data=excluded.data, raw=excluded.raw",
+            (isin, data.get("fetched_at") or now_iso(), json.dumps(data), json.dumps(raw) if raw is not None else None),
+        )
+
+
+def load_fundamentals(isin: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT isin, fetched_at, data, raw FROM fundamentals WHERE isin=?", (isin,)).fetchone()
+    return dict(row) if row else None
 
 
 # ------------------------------------------------------------------- scans

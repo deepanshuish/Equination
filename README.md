@@ -1,11 +1,17 @@
 # Equination
 
-A self-hosted web app that pulls NSE daily prices through **your own Upstox API
-key**, runs a trend-filtered momentum strategy every trading day, and shows
-you which stocks to hold, with stop-losses and position sizes.
+A self-hosted web app that pulls NSE prices, key ratios and shareholding
+patterns through **your own Upstox API key**, scans every trading day, and
+shows you which stocks to buy, with entry, stop-loss, target, holding period and
+position size. It never places orders.
 
-It is a **positional** (not intraday) system that aims for a realistic
-1-3% per month on average, with losing months. It never places orders.
+Two modes, both gated on fundamentals and promoter behaviour:
+
+- **4-day swing** (default): quality stocks in an uptrend that just pulled back
+  and printed a bullish reversal candle.
+- **Positional**: monthly momentum rotation with a Nifty regime filter.
+
+Both target a realistic 1-3% a month on average, with losing months.
 
 ![dashboard](docs/dashboard.png)
 
@@ -33,10 +39,45 @@ python run.py            # http://127.0.0.1:8000
 Everything (settings, secret, token, candles, scan history) lives in a local
 SQLite file under `data/`. Nothing leaves your machine except calls to Upstox.
 
-## The strategy
+## The strategies
 
-**Trend-filtered, volatility-adjusted momentum rotation**, see the *Strategy*
-tab in the app or `app/strategy.py`.
+Full detail is on the *Strategy* tab in the app.
+
+### Quality and promoter gates (both modes, `app/fundamentals.py`)
+
+Data comes from Upstox's `/v2/fundamentals/{isin}/key-ratios` and
+`/share-holdings` endpoints, cached for 7 days.
+
+| Check | Rule |
+|---|---|
+| Profitability | ROE ≥ 10%, P/E > 0 (not loss-making) and < 80, net margin > 0 |
+| Leverage | Debt/equity ≤ 1.5, skipped for banks/NBFCs/insurers |
+| Promoters selling | Excluded if promoter stake fell ≥ 1.5 pp over the last two quarters |
+| Pledging | Excluded if pledged holdings > 15% (where Upstox reports it) |
+| Warnings | Promoter holding < 25%, falling profits, missing data ("unverified") |
+| Your list | `Never suggest these symbols` in Settings |
+
+Tick *Exclude stocks where Upstox has no fundamentals data* to make missing
+data a hard exclusion. `GET /api/fundamentals/RELIANCE` shows the parsed values
+and the raw Upstox payload so the field mapping can be checked.
+
+### 4-day swing: quality pullback + reversal candle (`app/swing.py`, `app/patterns.py`)
+
+| Step | Rule |
+|---|---|
+| Uptrend | 50 DMA > 200 DMA, close > 200 DMA, close ≥ 0.95 × 50 DMA, 6-month return > 0 |
+| Pullback | 3-12% below the 20-day high; RSI(2) < 25 within the last 3 sessions |
+| Trigger | Morning star, bullish engulfing, piercing, hammer, bullish harami, or a strong high-volume close above yesterday's high |
+| Sanity | ATR 1-5% of price, liquid, not up > 25% in a month, Nifty above 200 DMA |
+| Rank | 35% trend quality + 20% pullback depth + 30% candle strength + 15% volume |
+| Plan | Stop under the pattern low (≤ 2.5 ATR); target = 10-day high or 2R; exit at the close of day N |
+
+The backtest replays every historical setup with the same stop/target/hold and
+compares it with buying the same trend-eligible stocks on random days, so you
+can see whether the trigger adds anything on your data. A good result is a
+58-65% win rate with a profit factor above 1.3.
+
+### Positional: trend-filtered, volatility-adjusted momentum rotation (`app/strategy.py`)
 
 | Step | Rule |
 |---|---|
@@ -102,8 +143,11 @@ app/
   main.py           FastAPI routes + OAuth callback
   upstox_client.py  login, instrument master, daily candles (v3 with v2 fallback)
   scanner.py        daily pipeline: refresh data → score → persist
-  strategy.py       regime filter, features, ranking, position sizing
-  backtest.py       monthly-rebalance backtest on the cached candles
+  strategy.py       positional mode: regime filter, momentum ranking, sizing
+  swing.py          swing mode: setup detection, trade plan, event backtest
+  patterns.py       bullish candlestick pattern detection
+  fundamentals.py   Upstox key ratios + shareholding: parsing and quality/promoter gates
+  backtest.py       monthly-rebalance backtest for positional mode
   scheduler.py      APScheduler cron (IST)
   db.py             SQLite storage
 static/             single-page UI (no build step)
