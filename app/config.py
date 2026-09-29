@@ -46,6 +46,11 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "hold_days": "4",
     "require_fundamentals": "0",
     "exclude_symbols": "",  # comma-separated symbols you never want suggested
+    "marketaux_key": "",
+    "sentiment_days": "7",
+    "w_quant": "55",  # cumulative score weights, percent
+    "w_sentiment": "30",
+    "w_quality": "15",
     "capital": "500000",
     "risk_per_trade_pct": "1.0",
     "top_n": "10",

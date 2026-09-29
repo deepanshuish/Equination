@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 
-from . import db, fundamentals as fnd, swing
+from . import db, fundamentals as fnd, sentiment as snt, swing
 from .config import HISTORY_DAYS, NIFTY_KEY
 from .strategy import (StrategyParams, build_picks, compute_features, eligibility_summary, market_regime,
                        score_features)
@@ -195,12 +195,16 @@ def run_scan(trigger: str = "manual") -> int:
         else:
             picks, stats = _scan_positional(stock_candles, universe, token, params, qp, regime)
 
+        picks, sstats = add_sentiment_and_rank(picks, settings, params.top_n)
+        stats.update(sstats)
         stats["mode"] = mode
         stats["missing_symbols"] = missing
         stats["fetch_errors"] = len(state.errors)
         stats["data_as_of"] = str(pd.Timestamp(stock_candles["date"].max()).date())
-        msg = f"{len(picks)} picks ({mode}); {stats.get('setups', stats.get('eligible', 0))} candidates, " \
-              f"{stats.get('gated_out', 0)} removed by fundamentals/promoter checks."
+        msg = (f"{stats['quant_picks']} quant / {stats['cumulative_picks']} cumulative picks ({mode}); "
+               f"{stats.get('setups', stats.get('eligible', 0))} candidates, "
+               f"{stats.get('gated_out', 0)} removed by fundamentals/promoter checks, "
+               f"{stats['sentiment_scored']} with news sentiment.")
         db.finish_scan(scan_id, "done", msg, regime.to_dict(), stats, picks)
         state.set(phase="done", message=msg)
     except AuthError as e:
@@ -234,7 +238,7 @@ def _scan_swing(stock_candles, names, token, p: swing.SwingParams, qp, regime):
         plan = fr.plan(key)
         qty, value, risk_amt = swing.size_position(plan["entry"], plan["stop"], p, regime.allocation)
         picks.append({
-            "rank": len(picks) + 1, "instrument_key": key,
+            "quant_rank": len(picks) + 1, "instrument_key": key,
             "symbol": names["symbol"].get(key, key), "name": names["name"].get(key, ""),
             "close": round(float(r["close"]), 2), "as_of": r["as_of"],
             "score": round(float(r["score"]), 1),
@@ -247,8 +251,6 @@ def _scan_swing(stock_candles, names, token, p: swing.SwingParams, qp, regime):
             **_fund_summary(funds[key]),
             "exit_rules": f"Sell if price hits the stop or the target, otherwise sell at the close on {exit_date}.",
         })
-        if len(picks) >= p.top_n:
-            break
     excl = cands.loc[~cands["setup"], "excluded"].str.split("; ").explode().value_counts().head(8).to_dict()
     stats = {"universe": int(len(cands)), "setups": int(len(setups)), "verified": len(shortlist),
              "gated_out": gated_out, "excluded_reasons": excl,
@@ -266,13 +268,81 @@ def _scan_positional(stock_candles, universe, token, p: StrategyParams, qp, regi
     scored.loc[bad, "eligible"] = False
     scored.loc[bad, "excluded"] = "fundamentals/promoter gate"
     scored["rank"] = scored["eligible"].cumsum().where(scored["eligible"], 0)
-    picks = build_picks(scored, universe, p, regime)
+    picks = build_picks(scored, universe, p, regime, limit=len(shortlist))
     for pk in picks:
+        pk["quant_rank"] = pk.pop("rank")
         pk.update(_fund_summary(funds.get(pk["instrument_key"])))
     stats = eligibility_summary(scored)
     stats.update({"verified": len(shortlist), "gated_out": len(bad),
                   "gate_reasons": pd.Series([h for k in bad for h in funds[k]["assessment"]["hard"]]).value_counts().head(8).to_dict()
                   if bad else {}})
+    return picks, stats
+
+
+def add_sentiment_and_rank(picks: list[dict], settings: dict[str, str], top_n: int) -> tuple[list[dict], dict]:
+    """Fetches news sentiment for every gate-passing candidate, then assigns
+
+    * `rank`      - quant rank (numbers only), 0 when outside the top N
+    * `cum_rank`  - cumulative rank blending quant score, sentiment and quality
+    """
+    key = settings.get("marketaux_key", "")
+    days = int(float(settings.get("sentiment_days", 7) or 7))
+    wq = float(settings.get("w_quant", 55)); ws = float(settings.get("w_sentiment", 30)); wf = float(settings.get("w_quality", 15))
+    wsum = (wq + ws + wf) or 100.0
+    state.set(phase="sentiment", done=0, total=len(picks),
+              message="Reading news sentiment from Marketaux" if key else "Skipping sentiment (no Marketaux key)")
+    scored = 0
+    auth_err = ""
+    n = max(len(picks), 1)
+    for i, pk in enumerate(picks):
+        s = None
+        if key and not auth_err:
+            try:
+                s = snt.get_cached(pk["symbol"]) or snt.fetch(pk["symbol"], pk.get("name") or "", key, days)
+            except snt.SentimentAuthError as e:
+                auth_err = str(e)
+                with state.lock:
+                    state.errors.append(f"marketaux: {e}")
+            except snt.SentimentError as e:
+                with state.lock:
+                    state.errors.append(f"{pk['symbol']} sentiment: {e}")
+                s = snt.get_cached(pk["symbol"], max_age_hours=72)  # stale is better than nothing
+        elif not key:
+            s = snt.get_cached(pk["symbol"], max_age_hours=72)
+        if s and s.n_scored:
+            scored += 1
+        pk["sentiment_score"] = s.score if s else None
+        pk["sentiment_n"] = s.n_scored if s else 0
+        pk["sentiment_articles"] = s.n_articles if s else 0
+        pk["sentiment_verdict"] = s.verdict if s else "no_news"
+        pk["sentiment_pos"] = s.positive if s else 0
+        pk["sentiment_neg"] = s.negative if s else 0
+        pk["headlines"] = s.headlines if s else []
+        # quant percentile from the quant order (best = 100)
+        quant_pts = 100.0 * (1 - (pk["quant_rank"] - 1) / n)
+        sent_pts = snt.sentiment_points(s)
+        qual_pts = float(pk.get("quality_score") or 50.0)
+        pk["quant_points"] = round(quant_pts, 1)
+        pk["sentiment_points"] = sent_pts
+        pk["cum_score"] = round((wq * quant_pts + ws * sent_pts + wf * qual_pts) / wsum, 1)
+        pk["cum_excluded"] = (s is not None and s.score is not None and s.n_scored >= 2 and s.score <= snt.STRONG_NEGATIVE)
+        pk["rank"] = pk["quant_rank"] if pk["quant_rank"] <= top_n else 0
+        with state.lock:
+            state.done += 1
+    order = sorted([p for p in picks if not p["cum_excluded"]], key=lambda p: -p["cum_score"])
+    for i, pk in enumerate(order):
+        pk["cum_rank"] = i + 1 if i < top_n else 0
+    for pk in picks:
+        pk.setdefault("cum_rank", 0)
+    stats = {
+        "quant_picks": sum(1 for p in picks if p["rank"]),
+        "cumulative_picks": sum(1 for p in picks if p["cum_rank"]),
+        "sentiment_scored": scored,
+        "sentiment_excluded": sum(1 for p in picks if p["cum_excluded"]),
+        "sentiment_enabled": bool(key),
+        "sentiment_error": auth_err,
+        "weights": {"quant": wq, "sentiment": ws, "quality": wf},
+    }
     return picks, stats
 
 

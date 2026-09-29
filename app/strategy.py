@@ -149,9 +149,10 @@ def score_features(feats: pd.DataFrame, p: StrategyParams) -> pd.DataFrame:
     return f
 
 
-def build_picks(scored: pd.DataFrame, instruments: pd.DataFrame, p: StrategyParams, regime: Regime) -> list[dict]:
+def build_picks(scored: pd.DataFrame, instruments: pd.DataFrame, p: StrategyParams, regime: Regime,
+                limit: int | None = None) -> list[dict]:
     names = instruments.set_index("instrument_key")
-    picks = scored[scored["eligible"]].head(p.top_n)
+    picks = scored[scored["eligible"]].head(limit or p.top_n)
     deployable = p.capital * regime.allocation
     per_slot = deployable / max(p.top_n, 1)
     risk_amt = p.capital * p.risk_per_trade_pct / 100.0

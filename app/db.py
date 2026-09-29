@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     data TEXT NOT NULL,
     raw TEXT
 );
+CREATE TABLE IF NOT EXISTS news (
+    symbol TEXT PRIMARY KEY,
+    fetched_at TEXT NOT NULL,
+    data TEXT NOT NULL,
+    raw TEXT
+);
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at TEXT NOT NULL,
@@ -191,6 +197,22 @@ def load_fundamentals(isin: str) -> dict | None:
     return dict(row) if row else None
 
 
+# -------------------------------------------------------------------- news
+def save_news(symbol: str, data: dict, raw) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO news(symbol, fetched_at, data, raw) VALUES (?,?,?,?) "
+            "ON CONFLICT(symbol) DO UPDATE SET fetched_at=excluded.fetched_at, data=excluded.data, raw=excluded.raw",
+            (symbol.upper(), data.get("fetched_at") or now_iso(), json.dumps(data), json.dumps(raw) if raw is not None else None),
+        )
+
+
+def load_news(symbol: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT symbol, fetched_at, data, raw FROM news WHERE symbol=?", (symbol.upper(),)).fetchone()
+    return dict(row) if row else None
+
+
 # ------------------------------------------------------------------- scans
 def create_scan(params: dict) -> int:
     with get_conn() as conn:
@@ -211,7 +233,7 @@ def finish_scan(scan_id: int, status: str, message: str, regime: dict | None, st
         conn.execute("DELETE FROM scan_results WHERE scan_id=?", (scan_id,))
         conn.executemany(
             "INSERT INTO scan_results(scan_id, rank, instrument_key, symbol, data) VALUES (?,?,?,?,?)",
-            [(scan_id, r["rank"], r["instrument_key"], r["symbol"], json.dumps(r)) for r in results],
+            [(scan_id, i, r["instrument_key"], r["symbol"], json.dumps(r)) for i, r in enumerate(results)],
         )
 
 

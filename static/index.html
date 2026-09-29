@@ -4,75 +4,92 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Equination</title>
-<link rel="stylesheet" href="/static/styles.css?v=3">
+<link rel="stylesheet" href="/static/styles.css?v=4">
 </head>
 <body>
 <header class="top">
-  <div class="brand">Equination <span class="sub">daily NSE swing &amp; momentum picks, powered by your Upstox data</span></div>
+  <div class="brand">EQUINATION<span class="cursor"></span><span class="sub">// nse swing &amp; momentum scanner · upstox + marketaux</span></div>
   <nav>
-    <button data-tab="dashboard" class="active">Dashboard</button>
-    <button data-tab="backtest">Backtest</button>
-    <button data-tab="history">History</button>
-    <button data-tab="settings">Settings</button>
-    <button data-tab="strategy">Strategy</button>
+    <button data-tab="quant" class="active">quant</button>
+    <button data-tab="cumulative">cumulative</button>
+    <button data-tab="sentiment">sentiment</button>
+    <button data-tab="backtest">backtest</button>
+    <button data-tab="history">history</button>
+    <button data-tab="settings">settings</button>
+    <button data-tab="strategy">strategy</button>
   </nav>
+  <div class="sys" id="sys"></div>
 </header>
 
 <main>
   <div id="toast" class="toast hidden"></div>
 
-  <!-- ============================================================ dashboard -->
-  <section id="tab-dashboard" class="tab active">
+  <!-- ================================================================ quant -->
+  <section id="tab-quant" class="tab active">
     <div class="row space">
       <div>
-        <h1>Today's picks</h1>
-        <div id="scan-meta" class="muted">No scan yet.</div>
+        <h1>quant picks — numbers only</h1>
+        <div id="scan-meta" class="muted small">no scan yet.</div>
       </div>
-      <div class="actions">
-        <button id="btn-scan" class="primary">Run scan now</button>
-      </div>
+      <div class="actions"><button id="btn-scan" class="primary">▶ run scan</button></div>
     </div>
-
-    <div id="progress" class="progress hidden">
-      <div class="bar"><div id="progress-fill"></div></div>
-      <div id="progress-text" class="muted"></div>
-    </div>
-
+    <div id="progress" class="progress hidden"><div class="pbar"><div id="progress-fill"></div></div></div>
+    <div id="term" class="term hidden"></div>
     <div id="regime" class="regime hidden"></div>
-
     <div id="needs-login" class="callout warn hidden">
-      Your Upstox access token is missing or expired (tokens expire every morning at 3:30 IST).
-      <a href="#" data-goto="settings">Open Settings</a> to log in, then run the scan again.
+      Upstox access token missing or expired (tokens die at 03:30 IST daily).
+      <a href="#" data-goto="settings">open settings</a>, log in, run the scan again.
     </div>
-
-    <div class="table-wrap">
-      <table id="picks" class="picks">
-        <thead></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div id="stats" class="muted small"></div>
+    <div class="table-wrap"><table id="picks" class="picks"><thead></thead><tbody></tbody></table></div>
+    <div id="stats" class="stat-line"></div>
     <p id="mode-note" class="muted small"></p>
+  </section>
+
+  <!-- =========================================================== cumulative -->
+  <section id="tab-cumulative" class="tab">
+    <div class="row space">
+      <div>
+        <h1>cumulative picks — numbers + news + quality</h1>
+        <div id="cum-meta" class="muted small"></div>
+      </div>
+    </div>
+    <div id="cum-warn" class="callout warn hidden">No Marketaux key configured — cumulative ranking is running on quant + fundamentals only. Add the key in <a href="#" data-goto="settings">settings</a>.</div>
+    <div class="table-wrap"><table id="cum-picks"><thead></thead><tbody></tbody></table></div>
+    <p class="muted small">cum score = w<sub>q</sub>·quant percentile + w<sub>s</sub>·sentiment (0-100, confidence-weighted by article count) + w<sub>f</sub>·fundamentals quality. Stocks with strongly negative news (≤ -0.35 across ≥ 2 articles) are dropped. Same entry/stop/target as the quant list.</p>
+  </section>
+
+  <!-- ============================================================ sentiment -->
+  <section id="tab-sentiment" class="tab">
+    <div class="row space">
+      <div>
+        <h1>news sentiment — if you only read the headlines</h1>
+        <div class="muted small">every stock that passed the technical + fundamentals gate in the last scan, ranked by Marketaux sentiment alone. score is a recency-weighted mean of per-article entity sentiment in [-1, 1].</div>
+      </div>
+      <div class="row"><input id="sent-symbol" placeholder="lookup symbol e.g. INFY" style="width:220px;margin:0"><button id="btn-sent-lookup">query</button></div>
+    </div>
+    <div id="sent-lookup-out"></div>
+    <div class="table-wrap"><table id="sent-table"><thead><tr><th>#</th><th>symbol</th><th>verdict</th><th class="num">score</th><th class="num">articles</th><th class="num">+ / −</th><th>latest headlines</th></tr></thead><tbody></tbody></table></div>
+    <p class="muted small">verdict: positive ≥ +0.15 · negative ≤ −0.15 · otherwise neutral · no_news = nothing found in the window. sentiment alone is a weak signal on a 4-day horizon; it is most useful as a veto (avoid names with a cluster of bad news) and as a tie-breaker between similar quant setups.</p>
   </section>
 
   <!-- ============================================================= backtest -->
   <section id="tab-backtest" class="tab">
     <div class="row space">
       <div>
-        <h1>Backtest</h1>
-        <div class="muted" id="bt-desc">Replays the current mode's rules on the candles cached from Upstox.</div>
+        <h1>backtest</h1>
+        <div class="muted small" id="bt-desc">replays the current mode's rules on the candles cached from upstox.</div>
       </div>
-      <button id="btn-backtest" class="primary">Run backtest</button>
+      <button id="btn-backtest" class="primary">▶ run backtest</button>
     </div>
-    <div id="bt-out" class="muted">Run a scan first so there is data to test on.</div>
+    <div id="bt-out" class="muted">run a scan first so there is data to test on.</div>
   </section>
 
   <!-- ============================================================== history -->
   <section id="tab-history" class="tab">
-    <h1>Scan history</h1>
+    <h1>scan history</h1>
     <div class="table-wrap">
       <table class="plain">
-        <thead><tr><th>Run</th><th>Status</th><th>Regime</th><th>Message</th><th></th></tr></thead>
+        <thead><tr><th>run</th><th>status</th><th>mode</th><th>regime</th><th>message</th><th></th></tr></thead>
         <tbody id="history-body"></tbody>
       </table>
     </div>
@@ -81,79 +98,99 @@
 
   <!-- ============================================================= settings -->
   <section id="tab-settings" class="tab">
-    <h1>Settings</h1>
+    <h1>settings</h1>
     <div class="grid2">
       <div class="card">
-        <h2>Upstox connection</h2>
-        <p class="muted small">Create an app at <code>account.upstox.com/developer/apps</code> and set its redirect URL
-          to exactly the value below. The secret is stored only in the local SQLite database.</p>
-        <label>API key <input id="s-api_key" autocomplete="off"></label>
-        <label>API secret <input id="s-api_secret" type="password" autocomplete="off" placeholder="(unchanged)"></label>
-        <label>Redirect URI <input id="s-redirect_uri"></label>
+        <h2>upstox</h2>
+        <p class="muted small">create an app at <code>account.upstox.com/developer/apps</code> with the redirect url below (must match exactly). the secret is stored only in the local sqlite file.</p>
+        <label>api key <input id="s-api_key" autocomplete="off"></label>
+        <label>api secret <input id="s-api_secret" type="password" autocomplete="off" placeholder="(unchanged)"></label>
+        <label>redirect uri <input id="s-redirect_uri"></label>
         <div class="row">
-          <button id="btn-save-conn">Save</button>
-          <a id="btn-login" class="button primary" href="/login">Login with Upstox</a>
+          <button id="btn-save-conn">save</button>
+          <a id="btn-login" class="button primary" href="/login">login with upstox</a>
         </div>
-        <div id="token-state" class="muted small"></div>
+        <div id="token-state" class="muted small" style="margin-top:8px"></div>
         <details>
-          <summary>Paste an access token instead</summary>
-          <label>Access token <input id="s-token" type="password" autocomplete="off"></label>
-          <button id="btn-token">Verify &amp; save token</button>
+          <summary>paste an access token instead</summary>
+          <label>access token <input id="s-token" type="password" autocomplete="off"></label>
+          <button id="btn-token">verify &amp; save token</button>
         </details>
       </div>
 
       <div class="card">
-        <h2>Strategy &amp; schedule</h2>
-        <label>Mode
+        <h2>marketaux (news sentiment)</h2>
+        <p class="muted small">get a key at <code>marketaux.com</code>. free tier = 100 requests/day; equination queries only the shortlist and caches results for 12 h.</p>
+        <label>api token <input id="s-marketaux_key" type="password" autocomplete="off" placeholder="(unchanged)"></label>
+        <label>news window (days) <input id="s-sentiment_days" type="number" min="1" max="30" step="1"></label>
+        <h3>cumulative weights (%)</h3>
+        <div class="weights">
+          <label>quant <input id="s-w_quant" type="number" min="0" max="100"></label>
+          <label>sentiment <input id="s-w_sentiment" type="number" min="0" max="100"></label>
+          <label>quality <input id="s-w_quality" type="number" min="0" max="100"></label>
+        </div>
+        <div class="row"><button id="btn-save-news">save</button><button id="btn-clear-news">remove key</button><span id="news-state" class="muted small"></span></div>
+      </div>
+
+      <div class="card">
+        <h2>strategy &amp; schedule</h2>
+        <label>mode
           <select id="s-mode">
             <option value="swing">4-day swing: quality pullback + reversal candle</option>
-            <option value="positional">Positional: monthly momentum rotation</option>
+            <option value="positional">positional: monthly momentum rotation</option>
           </select>
         </label>
-        <label>Holding period for swing trades (trading days) <input id="s-hold_days" type="number" min="1" max="15" step="1"></label>
-        <label class="inline"><input id="s-require_fundamentals" type="checkbox"> Exclude stocks where Upstox has no fundamentals data</label>
-        <label>Never suggest these symbols (comma separated) <input id="s-exclude_symbols" placeholder="e.g. PAYTM, YESBANK"></label>
-        <label>Universe
+        <label>holding period for swing trades (trading days) <input id="s-hold_days" type="number" min="1" max="15" step="1"></label>
+        <label class="inline"><input id="s-require_fundamentals" type="checkbox"> exclude stocks where upstox has no fundamentals data</label>
+        <label>never suggest these symbols (comma separated) <input id="s-exclude_symbols" placeholder="e.g. PAYTM, YESBANK"></label>
+        <label>universe
           <select id="s-universe">
-            <option value="curated">Curated large &amp; mid caps (~200, fast)</option>
-            <option value="nse_all">All NSE equities (~2000, first refresh ~30 min)</option>
+            <option value="curated">curated large &amp; mid caps (~200, fast)</option>
+            <option value="nse_all">all nse equities (~2000, first refresh ~30 min)</option>
           </select>
         </label>
-        <label>Capital (₹) <input id="s-capital" type="number" min="1000" step="1000"></label>
-        <label>Risk per trade (% of capital) <input id="s-risk_per_trade_pct" type="number" min="0.1" max="5" step="0.1"></label>
-        <label>Number of picks <input id="s-top_n" type="number" min="3" max="30" step="1"></label>
-        <label>Minimum price (₹) <input id="s-min_price" type="number" min="1" step="1"></label>
-        <label>Minimum 20-day avg turnover (₹ crore) <input id="s-min_turnover_cr" type="number" min="0" step="0.5"></label>
-        <label>Daily scan time (IST, Mon-Fri) <input id="s-schedule_time" placeholder="18:30"></label>
-        <label class="inline"><input id="s-schedule_enabled" type="checkbox"> Scan automatically every trading day</label>
-        <div class="row"><button id="btn-save-strat">Save</button><span id="schedule-state" class="muted small"></span></div>
+        <label>capital (₹) <input id="s-capital" type="number" min="1000" step="1000"></label>
+        <label>risk per trade (% of capital) <input id="s-risk_per_trade_pct" type="number" min="0.1" max="5" step="0.1"></label>
+        <label>number of picks <input id="s-top_n" type="number" min="3" max="30" step="1"></label>
+        <label>minimum price (₹) <input id="s-min_price" type="number" min="1" step="1"></label>
+        <label>minimum 20-day avg turnover (₹ crore) <input id="s-min_turnover_cr" type="number" min="0" step="0.5"></label>
+        <label>daily scan time (ist, mon-fri) <input id="s-schedule_time" placeholder="18:30"></label>
+        <label class="inline"><input id="s-schedule_enabled" type="checkbox"> scan automatically every trading day</label>
+        <div class="row"><button id="btn-save-strat">save</button><span id="schedule-state" class="muted small"></span></div>
       </div>
     </div>
-    <div id="data-state" class="muted small"></div>
+    <div id="data-state" class="stat-line"></div>
   </section>
 
   <!-- ============================================================= strategy -->
   <section id="tab-strategy" class="tab">
-    <h1>How the picks are chosen</h1>
+    <h1>how the picks are chosen</h1>
     <div class="card prose">
-      <h2>Mode 1 — 4-day swing: quality pullback + reversal candle</h2>
+      <h2>three views of the same scan</h2>
+      <ul>
+        <li><strong>quant</strong> — purely numerical: price/volume setup, ranked by the technical score, gated on Upstox key ratios and shareholding numbers. No text is read.</li>
+        <li><strong>sentiment</strong> — purely qualitative: Marketaux news for each shortlisted stock, scored by article entity sentiment with a 3-day half-life. This is the "if I only read the news" view.</li>
+        <li><strong>cumulative</strong> — the blend: default 55% quant percentile, 30% sentiment (confidence grows with article count), 15% fundamentals quality score. Clusters of bad news veto a stock. Weights are editable in settings.</li>
+      </ul>
+
+      <h2>mode 1 — 4-day swing: quality pullback + reversal candle</h2>
       <p>Finds fundamentally sound stocks in an uptrend that have just pulled back for a few days and printed a bullish
         reversal candle. Historically this is the short-horizon setup with the best documented odds; the Backtest tab
         measures those odds on your own data. Every pick comes with an entry, stop, target and a "hold until" date.</p>
-      <h3>1. Quality gate (Upstox key ratios)</h3>
+      <h3>1. quality gate (upstox key ratios)</h3>
       <ul>
         <li>Return on equity ≥ 10%, positive earnings (P/E &gt; 0 and &lt; 80), positive net margin.</li>
         <li>Debt/equity ≤ 1.5 (skipped for banks, NBFCs and insurers, where leverage is the business).</li>
         <li>Missing data is flagged as "unverified"; tick the setting to exclude such stocks entirely.</li>
       </ul>
-      <h3>2. Promoter gate (Upstox shareholding pattern)</h3>
+      <h3>2. promoter gate (upstox shareholding pattern)</h3>
       <ul>
         <li><strong>Excluded</strong>: promoters cut their stake by ≥ 1.5 percentage points over the last two quarters,
           or pledged holdings &gt; 15% where reported.</li>
         <li><strong>Flagged</strong>: promoter holding below 25%; promoters adding is shown as a positive.</li>
         <li>Your own exclude list in Settings always wins.</li>
       </ul>
-      <h3>3. Technical setup</h3>
+      <h3>3. technical setup</h3>
       <ul>
         <li><strong>Uptrend</strong>: 50 DMA above 200 DMA, price above 200 DMA and within 5% of or above the 50 DMA, positive 6-month return.</li>
         <li><strong>Pullback</strong>: 3–12% below the 20-day high and RSI(2) dipped under 25 within the last 3 sessions.</li>
@@ -162,51 +199,51 @@
         <li><strong>Sanity</strong>: ATR between 1% and 5% of price, liquid, not up more than 25% in the last month.</li>
         <li><strong>Regime</strong>: Nifty 50 above its 200-day average, otherwise quantities go to zero.</li>
       </ul>
-      <h3>4. Ranking and trade plan</h3>
+      <h3>4. ranking and trade plan</h3>
       <p>Score = 35% trend quality (6-month return ÷ volatility) + 20% pullback depth + 30% candle strength + 15% volume.
         Stop = just under the pattern's low (max 2.5 ATR). Target = the 10-day high, or 2× the risk if that is closer.
         Exit at the stop, the target, or the close of the last holding day, whichever comes first.</p>
-      <h3>What to expect</h3>
+      <h3>what to expect</h3>
       <p>Short-horizon setups are a numbers game: a good result is a 58–65% win rate with winners a bit larger than
         losers, which compounds to the 1–3% a month you are targeting only if you take the trades consistently and
-        respect the stops. No fundamental or promoter check can see the next quarterly result or a surprise
+        respect the stops. No fundamental, promoter or sentiment check can see the next quarterly result or a surprise
         announcement — the stop is what protects you from those.</p>
 
-      <h2 style="margin-top:28px">Mode 2 — Positional: trend-filtered, volatility-adjusted momentum rotation</h2>
+      <h2 style="margin-top:28px">mode 2 — positional: trend-filtered, volatility-adjusted momentum rotation</h2>
       <p>Positional equity strategy aiming for a realistic <strong>1-3% per month on average</strong>, with some
         losing months. It never trades intraday and no orders are placed by this app.</p>
-      <h3>1. Market regime (Nifty 50)</h3>
+      <h3>1. market regime (nifty 50)</h3>
       <ul>
         <li><strong>RISK ON</strong>: Nifty above its 50 and 200-day averages: full allocation.</li>
         <li><strong>CAUTION</strong>: above 200-day, below 50-day: half allocation.</li>
         <li><strong>RISK OFF</strong>: below 200-day: no new buys. Momentum's worst losses happen in bear markets.</li>
       </ul>
-      <h3>2. Eligibility filters</h3>
+      <h3>2. eligibility filters</h3>
       <ul>
         <li>At least 260 daily bars, price above the minimum, 20-day average turnover above the minimum.</li>
         <li>Stock above its own 50 and 200-day averages and within 25% of its 52-week high.</li>
         <li>Annualised volatility below 60%; last-month return below 35% (avoids buying blow-off tops).</li>
       </ul>
-      <h3>3. Ranking</h3>
+      <h3>3. ranking</h3>
       <p><code>score = (0.40 × R<sub>12-1</sub> + 0.35 × R<sub>6</sub> + 0.25 × R<sub>3</sub>) / volatility<sub>63d</sub></code>.
         R<sub>12-1</sub> is the 12-month return skipping the latest month, the classic academic definition that
         sidesteps short-term mean reversion. Dividing by volatility prefers smooth trends.</p>
-      <h3>4. Position sizing and exits</h3>
+      <h3>4. position sizing and exits</h3>
       <ul>
         <li>Stop-loss at 2.5 × ATR(14) below the close. Quantity = min(risk budget ÷ distance to stop, equal-weight slot).</li>
         <li>Exit when a close is below the stop or the 50-day average, or when the stock drops out of the top 2N at the
           monthly review. Replace with the highest-ranked name you do not hold.</li>
-        <li>Rebalance monthly; check daily only for stop hits. Expect 2-6 trades a month with 10 positions.</li>
+        <li>Rebalance monthly; check daily only for stop hits. Expect 2–6 trades a month with 10 positions.</li>
       </ul>
-      <h3>Why this one</h3>
+      <h3>why this one</h3>
       <p>Momentum is the most persistent return anomaly documented across markets, including India, and it stacks well
         with trend filters. Its weakness, sharp drawdowns during regime changes, is exactly what the Nifty filter and
-        volatility scaling address. The same fundamentals and promoter gates are applied to the shortlist before the
-        final ranking. Run the backtest on your own downloaded data before trusting it, and remember that past
-        performance does not guarantee future results.</p>
+        volatility scaling address. The same fundamentals, promoter and sentiment layers are applied to the shortlist
+        before the final ranking. Run the backtest on your own downloaded data before trusting it, and remember that
+        past performance does not guarantee future results.</p>
     </div>
   </section>
 </main>
-<script src="/static/app.js?v=3"></script>
+<script src="/static/app.js?v=4"></script>
 </body>
 </html>

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, fundamentals as fnd, scheduler, swing
+from . import db, fundamentals as fnd, scheduler, sentiment as snt, swing
 from .backtest import run_backtest
 from .config import NIFTY_KEY, PASSWORD, STATIC_DIR
 from .scanner import refresh_instruments, start_scan_async, state
@@ -23,11 +23,11 @@ from .upstox_client import AuthError, UpstoxError, auth_dialog_url, exchange_cod
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("equination")
 
-SECRET_KEYS = {"api_secret", "access_token"}
+SECRET_KEYS = {"api_secret", "access_token", "marketaux_key"}
 EDITABLE_KEYS = {
     "api_key", "api_secret", "redirect_uri", "universe", "capital", "risk_per_trade_pct", "top_n",
     "min_price", "min_turnover_cr", "schedule_time", "schedule_enabled", "mode", "hold_days",
-    "require_fundamentals", "exclude_symbols",
+    "require_fundamentals", "exclude_symbols", "marketaux_key", "sentiment_days", "w_quant", "w_sentiment", "w_quality",
 }
 
 
@@ -65,6 +65,7 @@ def _public_settings() -> dict:
     out = {k: v for k, v in s.items() if k not in SECRET_KEYS}
     out["has_api_secret"] = bool(s.get("api_secret"))
     out["has_access_token"] = bool(s.get("access_token"))
+    out["has_marketaux_key"] = bool(s.get("marketaux_key"))
     out["token_issued_at"] = s.get("token_issued_at", "")
     out["schedule"] = scheduler.describe()
     return out
@@ -89,8 +90,15 @@ def get_settings():
 def save_settings(body: SettingsIn):
     vals = {k: v for k, v in body.values.items() if k in EDITABLE_KEYS}
     # An empty secret from the form means "keep the stored one".
-    if vals.get("api_secret", None) == "":
-        vals.pop("api_secret")
+    for k in ("api_secret", "marketaux_key"):
+        if vals.get(k, None) == "":
+            vals.pop(k)
+    for k in ("sentiment_days", "w_quant", "w_sentiment", "w_quality"):
+        if k in vals:
+            try:
+                float(vals[k])
+            except ValueError:
+                raise HTTPException(400, f"{k} must be a number")
     if "schedule_time" in vals:
         try:
             hh, mm = vals["schedule_time"].split(":")
@@ -128,6 +136,32 @@ def set_token(body: TokenIn):
         raise HTTPException(502, str(e))
     db.set_settings({"access_token": token, "token_issued_at": db.now_iso()})
     return {"ok": True, "user": profile.get("user_name") or profile.get("email")}
+
+
+@app.post("/api/marketaux/clear")
+def clear_marketaux():
+    db.set_settings({"marketaux_key": ""})
+    return {"ok": True}
+
+
+@app.get("/api/sentiment/{symbol}")
+def sentiment_debug(symbol: str, refresh: bool = False):
+    """Parsed sentiment plus the raw Marketaux articles, for checking the mapping."""
+    inst = db.get_instruments()
+    row = inst[inst["symbol"].str.upper() == symbol.upper()]
+    name = str(row.iloc[0]["name"] or "") if not row.empty else symbol
+    key = db.get_settings().get("marketaux_key", "")
+    try:
+        s = snt.fetch(symbol.upper(), name, key) if (refresh or snt.get_cached(symbol.upper()) is None) and key else snt.get_cached(symbol.upper(), 1e6)
+    except snt.SentimentAuthError as e:
+        raise HTTPException(401, str(e))
+    except snt.SentimentError as e:
+        raise HTTPException(502, str(e))
+    if s is None:
+        raise HTTPException(404, "no cached sentiment and no Marketaux key to fetch it")
+    raw = db.load_news(symbol.upper()) or {}
+    return {"symbol": symbol.upper(), "sentiment": s.to_dict(), "points": snt.sentiment_points(s),
+            "raw": json.loads(raw["raw"]) if raw.get("raw") else None}
 
 
 @app.post("/api/token/clear")

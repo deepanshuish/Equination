@@ -118,4 +118,4 @@ def test_api_smoke():
         r = c.get("/login", follow_redirects=False)
         assert r.status_code in (302, 307) and "client_id=k" in r.headers["location"]
         assert c.get("/api/scan/status").json()["running"] is False
-        assert c.get("/api/status").json()["scan"]["phase"] == "idle"
+        assert c.get("/api/status").json()["scan"]["running"] is False

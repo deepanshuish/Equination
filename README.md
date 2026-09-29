@@ -11,7 +11,18 @@ Two modes, both gated on fundamentals and promoter behaviour:
   and printed a bullish reversal candle.
 - **Positional**: monthly momentum rotation with a Nifty regime filter.
 
-Both target a realistic 1-3% a month on average, with losing months.
+Three views of every scan:
+
+- **Quant** — numbers only: the technical setup, ranked by technical score,
+  gated on Upstox key ratios and shareholding numbers.
+- **Sentiment** — news only: [Marketaux](https://www.marketaux.com) articles
+  for each shortlisted stock, scored by entity sentiment with a 3-day
+  half-life; the "if I only read the headlines" view.
+- **Cumulative** — the blend (default 55% quant / 30% sentiment / 15%
+  fundamentals quality, editable), with strongly negative news as a veto.
+
+All of it targets a realistic 1-3% a month on average, with losing months.
+The UI is a green-on-black terminal; expect scanlines.
 
 ![dashboard](docs/dashboard.png)
 
@@ -35,6 +46,11 @@ python run.py            # http://127.0.0.1:8000
    marked `needs_login` and the dashboard tells you.
 5. Open **Backtest** to see how the exact same rules did on the data you just
    downloaded, versus buying the Nifty 50.
+6. Optional: paste a **Marketaux** API token in Settings to enable the
+   Sentiment and Cumulative views. The free tier allows 100 requests/day;
+   Equination queries only the shortlist (≈ 3 × number of picks) and caches
+   each symbol for 12 hours. `GET /api/sentiment/INFY?refresh=true` shows the
+   parsed result and the raw articles.
 
 Everything (settings, secret, token, candles, scan history) lives in a local
 SQLite file under `data/`. Nothing leaves your machine except calls to Upstox.
@@ -60,6 +76,23 @@ Data comes from Upstox's `/v2/fundamentals/{isin}/key-ratios` and
 Tick *Exclude stocks where Upstox has no fundamentals data* to make missing
 data a hard exclusion. `GET /api/fundamentals/RELIANCE` shows the parsed values
 and the raw Upstox payload so the field mapping can be checked.
+
+### News sentiment and the cumulative score (`app/sentiment.py`)
+
+For each shortlisted stock Marketaux is queried for `SYMBOL.NSE` (falling
+back to a company-name search restricted to India) over the last 7 days.
+Each article's entity `sentiment_score` (−1…1) is weighted by the entity
+match score and a 3-day recency half-life:
+
+| Output | Rule |
+|---|---|
+| Verdict | positive ≥ +0.15, negative ≤ −0.15, else neutral; no_news when nothing scored |
+| Sentiment points | 50 + 50 × score × confidence, confidence = 1 − e^(−articles/3) |
+| Cumulative score | (w_q × quant percentile + w_s × sentiment points + w_f × quality score) / Σw |
+| Veto | score ≤ −0.35 across ≥ 2 articles removes the stock from the cumulative list |
+
+Sentiment is not part of the backtest (no news history), so treat it as a
+veto and a tie-breaker, not as a stand-alone signal.
 
 ### 4-day swing: quality pullback + reversal candle (`app/swing.py`, `app/patterns.py`)
 
@@ -147,6 +180,7 @@ app/
   swing.py          swing mode: setup detection, trade plan, event backtest
   patterns.py       bullish candlestick pattern detection
   fundamentals.py   Upstox key ratios + shareholding: parsing and quality/promoter gates
+  sentiment.py      Marketaux news sentiment: fetch, cache, score, verdict
   backtest.py       monthly-rebalance backtest for positional mode
   scheduler.py      APScheduler cron (IST)
   db.py             SQLite storage
