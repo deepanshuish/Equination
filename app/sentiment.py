@@ -189,3 +189,110 @@ def get(symbol: str, name: str, api_key: str) -> Sentiment:
     if cached is not None:
         return cached
     return fetch(symbol, name, api_key)
+
+
+# ------------------------------------------------------------------ sweep
+STATS_URL = "https://api.marketaux.com/v1/entity/stats"
+
+
+def fetch_entity_stats(symbols: list[str], api_key: str, days: int = 7) -> dict[str, dict] | None:
+    """Aggregated sentiment for several symbols in one request via /v1/entity/stats.
+
+    Returns {SYMBOL: {"score": avg, "n": documents}} or None when the endpoint
+    is not available on this plan (the caller then falls back to per-symbol news).
+    """
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M")
+    q = {"api_token": api_key, "symbols": ",".join(f"{s}.NSE" for s in symbols), "published_after": since}
+    try:
+        resp = httpx.get(STATS_URL, params=q, timeout=30)
+    except httpx.HTTPError as e:
+        raise SentimentError(f"network: {e}")
+    if resp.status_code in (401, 402):
+        raise SentimentAuthError(f"Marketaux rejected the API key ({resp.status_code}): {resp.text[:150]}")
+    if resp.status_code in (403, 404):
+        return None
+    if resp.status_code == 429:
+        raise SentimentError("Marketaux rate limit / daily quota reached (429)")
+    if resp.status_code != 200:
+        raise SentimentError(f"Marketaux stats {resp.status_code}: {resp.text[:150]}")
+    body = resp.json()
+    if "error" in body:
+        return None
+    out: dict[str, dict] = {}
+    for row in body.get("data") or []:
+        key = str(row.get("key") or row.get("symbol") or "").upper().split(".")[0]
+        n = int(row.get("total_documents") or row.get("documents") or 0)
+        avg = row.get("sentiment_avg")
+        if avg is None:
+            avg = row.get("sentiment_average")
+        if key:
+            out[key] = {"score": round(float(avg), 3) if avg is not None else None, "n": n}
+    return out
+
+
+def sweep(universe: list[tuple[str, str]], api_key: str, days: int = 7, budget: int = 40,
+          batch: int = 10, progress=None) -> dict:
+    """Ranks a whole universe by average sentiment.
+
+    `universe` is [(symbol, name), ...]. Uses entity stats in batches when the
+    plan allows it; otherwise queries news per symbol, cached first, up to
+    `budget` fresh requests. Returns a dict with ranked rows and metadata.
+    """
+    rows: dict[str, dict] = {}
+    requests_used = 0
+    method = "entity_stats"
+    stats_ok = True
+    try:
+        for i in range(0, len(universe), batch):
+            chunk = universe[i:i + batch]
+            res = fetch_entity_stats([s for s, _ in chunk], api_key, days)
+            requests_used += 1
+            if res is None:
+                stats_ok = False
+                break
+            for s, name in chunk:
+                r = res.get(s, {"score": None, "n": 0})
+                rows[s] = {"symbol": s, "name": name, "score": r["score"], "n": r["n"], "source": "stats"}
+            if progress:
+                progress(min(i + batch, len(universe)), len(universe))
+            if requests_used >= budget:
+                break
+    except SentimentError as e:
+        if not rows:
+            stats_ok = False
+        else:
+            raise
+    if not stats_ok:
+        method = "news_per_symbol"
+        rows = {}
+        fresh = 0
+        for i, (s, name) in enumerate(universe):
+            c = get_cached(s)
+            if c is None and fresh < budget:
+                try:
+                    c = fetch(s, name, api_key, days)
+                    fresh += 1
+                except SentimentAuthError:
+                    raise
+                except SentimentError as e:
+                    if "429" in str(e):
+                        break
+                    c = get_cached(s, 1e6)
+            if c is None:
+                c = get_cached(s, 1e6)
+            rows[s] = {"symbol": s, "name": name, "score": c.score if c else None, "n": c.n_scored if c else 0,
+                       "source": "cache" if c and not fresh else "news", "headlines": (c.headlines[:2] if c else [])}
+            if progress:
+                progress(i + 1, len(universe))
+        requests_used = fresh
+    ranked = [r for r in rows.values() if r["score"] is not None and r["n"] >= 2]
+    ranked.sort(key=lambda r: (-r["score"], -r["n"]))
+    for r in ranked:
+        r["verdict"] = verdict(r["score"], r["n"])
+    return {
+        "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "method": method, "requests_used": requests_used, "days": days,
+        "covered": len(rows), "scored": len(ranked), "universe": len(universe),
+        "top": ranked[:10], "bottom": ranked[-10:][::-1] if len(ranked) > 10 else [],
+        "all": ranked,
+    }

@@ -94,6 +94,15 @@ match score and a 3-day recency half-life:
 Sentiment is not part of the backtest (no news history), so treat it as a
 veto and a tie-breaker, not as a stand-alone signal.
 
+**Market sweep** (Sentiment tab → *sweep universe*) ranks the *whole*
+universe by average sentiment and shows the top and bottom 5 (≥ 2 scored
+articles to qualify). It first tries Marketaux's `/v1/entity/stats`
+endpoint, which aggregates several symbols per request; if that is not on
+your plan it falls back to per-symbol news queries, cache first, within the
+`max fresh requests per sweep` budget in Settings (default 40, so a sweep
+plus a daily scan fits the free tier). It can also run automatically at the
+end of every scan.
+
 ### 4-day swing: quality pullback + reversal candle (`app/swing.py`, `app/patterns.py`)
 
 | Step | Rule |

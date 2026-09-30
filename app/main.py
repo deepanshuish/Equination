@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from . import db, fundamentals as fnd, scheduler, sentiment as snt, swing
 from .backtest import run_backtest
 from .config import NIFTY_KEY, PASSWORD, STATIC_DIR
-from .scanner import refresh_instruments, start_scan_async, state
+from .scanner import refresh_instruments, start_scan_async, start_sweep_async, state
 from .strategy import StrategyParams
 from .universe import select_universe
 from .upstox_client import AuthError, UpstoxError, auth_dialog_url, exchange_code, verify_token
@@ -28,6 +28,7 @@ EDITABLE_KEYS = {
     "api_key", "api_secret", "redirect_uri", "universe", "capital", "risk_per_trade_pct", "top_n",
     "min_price", "min_turnover_cr", "schedule_time", "schedule_enabled", "mode", "hold_days",
     "require_fundamentals", "exclude_symbols", "marketaux_key", "sentiment_days", "w_quant", "w_sentiment", "w_quality",
+    "sweep_budget", "sweep_in_scan",
 }
 
 
@@ -93,7 +94,7 @@ def save_settings(body: SettingsIn):
     for k in ("api_secret", "marketaux_key"):
         if vals.get(k, None) == "":
             vals.pop(k)
-    for k in ("sentiment_days", "w_quant", "w_sentiment", "w_quality"):
+    for k in ("sentiment_days", "w_quant", "w_sentiment", "w_quality", "sweep_budget"):
         if k in vals:
             try:
                 float(vals[k])
@@ -162,6 +163,26 @@ def sentiment_debug(symbol: str, refresh: bool = False):
     raw = db.load_news(symbol.upper()) or {}
     return {"symbol": symbol.upper(), "sentiment": s.to_dict(), "points": snt.sentiment_points(s),
             "raw": json.loads(raw["raw"]) if raw.get("raw") else None}
+
+
+@app.post("/api/sweep")
+def sweep():
+    if not db.get_settings().get("marketaux_key"):
+        raise HTTPException(400, "No Marketaux API key configured")
+    try:
+        start_sweep_async()
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return {"started": True}
+
+
+@app.get("/api/sweep/latest")
+def sweep_latest(top: int = 5):
+    res = db.latest_sweep()
+    if not res:
+        return {"status": "none"}
+    return {**{k: v for k, v in res.items() if k != "all"}, "top": res["all"][:top],
+            "bottom": res["all"][-top:][::-1] if len(res["all"]) > top else []}
 
 
 @app.post("/api/token/clear")

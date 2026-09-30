@@ -206,6 +206,12 @@ def run_scan(trigger: str = "manual") -> int:
                f"{stats.get('gated_out', 0)} removed by fundamentals/promoter checks, "
                f"{stats['sentiment_scored']} with news sentiment.")
         db.finish_scan(scan_id, "done", msg, regime.to_dict(), stats, picks)
+        if settings.get("sweep_in_scan", "0") == "1" and settings.get("marketaux_key"):
+            try:
+                run_sweep(settings)
+            except Exception as e:  # noqa: BLE001 - the scan itself succeeded
+                with state.lock:
+                    state.errors.append(f"sweep: {e}")
         state.set(phase="done", message=msg)
     except AuthError as e:
         db.finish_scan(scan_id, "needs_login", str(e), None, None, [])
@@ -344,6 +350,50 @@ def add_sentiment_and_rank(picks: list[dict], settings: dict[str, str], top_n: i
         "weights": {"quant": wq, "sentiment": ws, "quality": wf},
     }
     return picks, stats
+
+
+def run_sweep(settings: dict[str, str] | None = None) -> dict:
+    """Sentiment sweep of the whole universe; stores and returns the result."""
+    settings = settings or db.get_settings()
+    key = settings.get("marketaux_key", "")
+    if not key:
+        raise snt.SentimentAuthError("No Marketaux API key configured.")
+    instruments = db.get_instruments()
+    universe, _ = select_universe(instruments, settings["universe"])
+    excluded = _excluded_set(settings)
+    universe = universe[~universe["symbol"].str.upper().isin(excluded)]
+    if universe.empty:
+        raise RuntimeError("Instrument universe is empty - run a scan first so the NSE list is cached.")
+    pairs = [(r.symbol, str(r.name or "")) for r in universe.itertuples(index=False)]
+    state.set(phase="sweep", done=0, total=len(pairs), message="Sweeping universe sentiment via Marketaux")
+
+    def progress(done, total):
+        state.set(done=done, total=total)
+
+    res = snt.sweep(pairs, key, days=int(float(settings.get("sentiment_days", 7) or 7)),
+                    budget=int(float(settings.get("sweep_budget", 40) or 40)), progress=progress)
+    db.save_sweep(res)
+    return res
+
+
+def start_sweep_async() -> None:
+    if state.running:
+        raise RuntimeError("A scan is already running")
+
+    def _go():
+        state.set(running=True, phase="sweep", done=0, total=0, message="", errors=[], scan_id=None,
+                  started_at=datetime.now().isoformat(timespec="seconds"))
+        try:
+            res = run_sweep()
+            state.set(phase="done", message=f"sweep done: {res['scored']} of {res['covered']} symbols scored "
+                                            f"({res['method']}, {res['requests_used']} requests)")
+        except Exception as e:  # noqa: BLE001
+            log.error("sweep failed: %s\n%s", e, traceback.format_exc())
+            state.set(phase="failed", message=f"sweep failed: {e}")
+        finally:
+            state.set(running=False)
+
+    threading.Thread(target=_go, daemon=True, name="equination-sweep").start()
 
 
 def start_scan_async(trigger: str = "manual") -> None:

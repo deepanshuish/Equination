@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS news (
     data TEXT NOT NULL,
     raw TEXT
 );
+CREATE TABLE IF NOT EXISTS sweeps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_at TEXT NOT NULL,
+    data TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at TEXT NOT NULL,
@@ -211,6 +216,18 @@ def load_news(symbol: str) -> dict | None:
     with get_conn() as conn:
         row = conn.execute("SELECT symbol, fetched_at, data, raw FROM news WHERE symbol=?", (symbol.upper(),)).fetchone()
     return dict(row) if row else None
+
+
+def save_sweep(data: dict) -> int:
+    with get_conn() as conn:
+        cur = conn.execute("INSERT INTO sweeps(run_at, data) VALUES (?,?)", (data.get("run_at") or now_iso(), json.dumps(data)))
+        return int(cur.lastrowid)
+
+
+def latest_sweep() -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT data FROM sweeps ORDER BY id DESC LIMIT 1").fetchone()
+    return json.loads(row["data"]) if row else None
 
 
 # ------------------------------------------------------------------- scans

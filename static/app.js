@@ -191,6 +191,31 @@
     } catch (e) { out.innerHTML = `<div class="callout warn">${esc(e.message)}</div>`; }
   });
 
+  // -------------------------------------------------------------- sweep
+  function sweepRow(r, i) {
+    return `<tr><td>${i + 1}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td><span class="badge ${r.verdict}">${(r.verdict || '').replace('_', ' ')}</span></td><td class="num ${r.score > 0 ? 'pos' : r.score < 0 ? 'neg' : 'neu'}">${r.score >= 0 ? '+' : ''}${fmt(r.score, 2)}</td><td class="num">${r.n}</td></tr>`;
+  }
+  async function loadSweep() {
+    const s = await api('/api/sweep/latest?top=5').catch(() => null);
+    if (!s || s.status === 'none') return;
+    $('#sweep-meta').textContent = `last sweep ${ist(s.run_at)} · ${s.scored} of ${s.covered} symbols scored (${s.universe} in universe) · method ${s.method} · ${s.requests_used} marketaux requests · ${s.days}-day window`;
+    $('#sweep-top').innerHTML = s.top.map(sweepRow).join('') || '<tr><td colspan="5" class="muted">nothing qualified (need ≥ 2 scored articles)</td></tr>';
+    $('#sweep-bottom').innerHTML = s.bottom.map(sweepRow).join('') || '<tr><td colspan="5" class="muted">-</td></tr>';
+  }
+  let sweepPoll;
+  $('#btn-sweep').addEventListener('click', async () => {
+    try {
+      await api('/api/sweep', { method: 'POST' });
+      $('#btn-sweep').disabled = true; $('#sweep-meta').textContent = 'sweeping…';
+      const tick = async () => {
+        const st = await api('/api/scan/status').catch(() => null);
+        if (st && st.running) { $('#sweep-meta').textContent = `sweeping… ${st.done}/${st.total}`; sweepPoll = setTimeout(tick, 1500); return; }
+        $('#btn-sweep').disabled = false; toast(st?.message || 'sweep finished', st?.phase === 'failed'); loadSweep();
+      };
+      tick();
+    } catch (e) { toast(e.message, true); }
+  });
+
   // -------------------------------------------------------------- backtest
   function metric(k, v, b) { return `<div class="metric"><div class="k">${k}</div><div class="v">${v}</div><div class="b">${b || ''}</div></div>`; }
   function chart(curve) {
@@ -270,11 +295,12 @@
   });
 
   // -------------------------------------------------------------- settings
-  const FIELDS = ['api_key', 'redirect_uri', 'universe', 'mode', 'hold_days', 'exclude_symbols', 'capital', 'risk_per_trade_pct', 'top_n', 'min_price', 'min_turnover_cr', 'schedule_time', 'sentiment_days', 'w_quant', 'w_sentiment', 'w_quality'];
+  const FIELDS = ['api_key', 'redirect_uri', 'universe', 'mode', 'hold_days', 'exclude_symbols', 'capital', 'risk_per_trade_pct', 'top_n', 'min_price', 'min_turnover_cr', 'schedule_time', 'sentiment_days', 'w_quant', 'w_sentiment', 'w_quality', 'sweep_budget'];
   async function loadSettings() {
     const s = await api('/api/settings');
     FIELDS.forEach((k) => { $('#s-' + k).value = s[k] ?? ''; });
     $('#s-schedule_enabled').checked = s.schedule_enabled === '1';
+    $('#s-sweep_in_scan').checked = s.sweep_in_scan === '1';
     $('#s-require_fundamentals').checked = s.require_fundamentals === '1';
     $('#s-api_secret').placeholder = s.has_api_secret ? '(saved — leave blank to keep)' : 'paste your api secret';
     $('#s-marketaux_key').placeholder = s.has_marketaux_key ? '(saved — leave blank to keep)' : 'paste your marketaux token';
@@ -298,7 +324,8 @@
   });
   $('#btn-save-news').addEventListener('click', async () => {
     const values = { marketaux_key: $('#s-marketaux_key').value.trim() };
-    ['sentiment_days', 'w_quant', 'w_sentiment', 'w_quality'].forEach((k) => { values[k] = $('#s-' + k).value.trim(); });
+    ['sentiment_days', 'w_quant', 'w_sentiment', 'w_quality', 'sweep_budget'].forEach((k) => { values[k] = $('#s-' + k).value.trim(); });
+    values.sweep_in_scan = $('#s-sweep_in_scan').checked ? '1' : '0';
     await saveSettings(values, 'marketaux settings saved');
     $('#s-marketaux_key').value = '';
   });
@@ -319,5 +346,5 @@
   const q = new URLSearchParams(location.search);
   if (q.get('login') === 'ok') { toast('logged in to upstox'); history.replaceState({}, '', '/'); }
   else if (q.get('login') === 'error') { toast('upstox login failed: ' + (q.get('msg') || ''), true); history.replaceState({}, '', '/'); showTab('settings'); }
-  loadLatest(); pollStatus(); sysStatus();
+  loadLatest(); pollStatus(); sysStatus(); loadSweep();
 })();

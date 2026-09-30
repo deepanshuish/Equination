@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Equination</title>
-<link rel="stylesheet" href="/static/styles.css?v=4">
+<link rel="stylesheet" href="/static/styles.css?v=5">
 </head>
 <body>
 <header class="top">
@@ -68,6 +68,28 @@
       <div class="row"><input id="sent-symbol" placeholder="lookup symbol e.g. INFY" style="width:220px;margin:0"><button id="btn-sent-lookup">query</button></div>
     </div>
     <div id="sent-lookup-out"></div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="row space" style="margin-bottom:6px">
+        <div>
+          <h2>market sweep — top 5 by average sentiment</h2>
+          <div id="sweep-meta" class="muted small">no sweep yet. scans the whole universe (not just the shortlist) and ranks by average news sentiment; needs ≥ 2 scored articles to qualify.</div>
+        </div>
+        <button id="btn-sweep" class="primary">▶ sweep universe</button>
+      </div>
+      <div class="grid2">
+        <div>
+          <h3>most positive</h3>
+          <div class="table-wrap"><table><thead><tr><th>#</th><th>symbol</th><th>verdict</th><th class="num">avg</th><th class="num">articles</th></tr></thead><tbody id="sweep-top"></tbody></table></div>
+        </div>
+        <div>
+          <h3>most negative (avoid)</h3>
+          <div class="table-wrap"><table><thead><tr><th>#</th><th>symbol</th><th>verdict</th><th class="num">avg</th><th class="num">articles</th></tr></thead><tbody id="sweep-bottom"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <h3>shortlist sentiment (from the last scan)</h3>
     <div class="table-wrap"><table id="sent-table"><thead><tr><th>#</th><th>symbol</th><th>verdict</th><th class="num">score</th><th class="num">articles</th><th class="num">+ / −</th><th>latest headlines</th></tr></thead><tbody></tbody></table></div>
     <p class="muted small">verdict: positive ≥ +0.15 · negative ≤ −0.15 · otherwise neutral · no_news = nothing found in the window. sentiment alone is a weak signal on a 4-day horizon; it is most useful as a veto (avoid names with a cluster of bad news) and as a tie-breaker between similar quant setups.</p>
   </section>
@@ -129,6 +151,9 @@
           <label>sentiment <input id="s-w_sentiment" type="number" min="0" max="100"></label>
           <label>quality <input id="s-w_quality" type="number" min="0" max="100"></label>
         </div>
+        <h3>market sweep</h3>
+        <label>max fresh requests per sweep <input id="s-sweep_budget" type="number" min="5" max="500" step="5"></label>
+        <label class="inline"><input id="s-sweep_in_scan" type="checkbox"> run the sweep at the end of every scan</label>
         <div class="row"><button id="btn-save-news">save</button><button id="btn-clear-news">remove key</button><span id="news-state" class="muted small"></span></div>
       </div>
 
@@ -244,6 +269,6 @@
     </div>
   </section>
 </main>
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

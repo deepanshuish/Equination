@@ -51,6 +51,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "w_quant": "55",  # cumulative score weights, percent
     "w_sentiment": "30",
     "w_quality": "15",
+    "sweep_budget": "40",  # max fresh Marketaux requests per sweep
+    "sweep_in_scan": "0",  # also run the sweep at the end of every scan
     "capital": "500000",
     "risk_per_trade_pct": "1.0",
     "top_n": "10",

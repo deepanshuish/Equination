@@ -55,3 +55,30 @@ def test_add_sentiment_and_rank_uses_cache_and_vetoes():
     assert by["BBB"]["cum_rank"] == 1 and by["BBB"]["sentiment_verdict"] == "no_news"
     assert by["AAA"]["cum_score"] > 0 and by["AAA"]["sentiment_points"] > 60
     assert stats["quant_picks"] == 2 and stats["cumulative_picks"] == 2 and stats["sentiment_excluded"] == 1
+
+
+def test_sweep_uses_entity_stats_then_falls_back(monkeypatch):
+    universe = [("SW1", "Sw1 Ltd"), ("SW2", "Sw2 Ltd"), ("SW3", "Sw3 Ltd")]
+
+    # 1) entity stats available: one request per batch, ranked by avg with >= 2 docs
+    monkeypatch.setattr(snt, "fetch_entity_stats", lambda syms, key, days=7: {
+        "SW1": {"score": 0.4, "n": 5}, "SW2": {"score": 0.9, "n": 1}, "SW3": {"score": -0.5, "n": 3}})
+    res = snt.sweep(universe, "k", budget=10, batch=10)
+    assert res["method"] == "entity_stats" and res["requests_used"] == 1
+    assert [r["symbol"] for r in res["all"]] == ["SW1", "SW3"]  # SW2 has only 1 article
+    assert res["all"][0]["verdict"] == "positive" and res["all"][-1]["verdict"] == "negative"
+
+    # 2) endpoint not on the plan (None) -> per-symbol news within budget, cache first
+    monkeypatch.setattr(snt, "fetch_entity_stats", lambda syms, key, days=7: None)
+    calls = []
+
+    def fake_fetch(symbol, name, key, days=7):
+        calls.append(symbol)
+        s = snt.score_articles([_art("x", 0.3, 0, f"{symbol}.NSE"), _art("y", 0.5, 1, f"{symbol}.NSE")], symbol, name)
+        db.save_news(symbol, s.to_dict(), [])
+        return s
+    monkeypatch.setattr(snt, "fetch", fake_fetch)
+    db.init_db()
+    res = snt.sweep(universe, "k", budget=2)
+    assert res["method"] == "news_per_symbol" and res["requests_used"] == 2 and calls == ["SW1", "SW2"]
+    assert res["scored"] == 2  # SW3 had no cache and no budget left
