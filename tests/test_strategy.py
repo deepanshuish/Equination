@@ -93,17 +93,18 @@ def test_backtest_runs(candles):
 
 def test_db_roundtrip(candles):
     db.init_db()
-    db.set_settings({"top_n": "7", "api_secret": "x"})
-    assert db.get_settings()["top_n"] == "7"
+    db.set_settings(1, {"top_n": "7", "api_secret": "x"})
+    assert db.get_settings(1)["top_n"] == "7" and db.get_settings(1)["api_secret"] == "x"
     one = candles[candles["instrument_key"] == "NSE_EQ|STRONG"].copy()
     one["date"] = one["date"].dt.strftime("%Y-%m-%d")
     assert db.upsert_candles("NSE_EQ|STRONG", one[["date", "open", "high", "low", "close", "volume"]]) == len(one)
     assert db.last_candle_dates()["NSE_EQ|STRONG"] == one["date"].max()
-    scan_id = db.create_scan({"top_n": 7})
+    scan_id = db.create_scan(1, {"top_n": 7})
     db.finish_scan(scan_id, "done", "ok", {"state": "RISK_ON"}, {"universe": 1},
                    [{"rank": 1, "instrument_key": "NSE_EQ|STRONG", "symbol": "STRONG"}])
-    latest = db.get_scan()
+    latest = db.get_scan(1)
     assert latest["id"] == scan_id and latest["results"][0]["symbol"] == "STRONG"
+    assert db.get_scan(2) is None  # another user cannot see it
 
 
 def test_api_smoke():
@@ -112,10 +113,13 @@ def test_api_smoke():
 
     with TestClient(app) as c:
         assert c.get("/").status_code == 200
+        assert c.post("/api/auth/signup", data={"email": "smoke@example.com", "password": "password1"}).status_code == 200
+        assert c.get("/app").status_code == 200
         s = c.post("/api/settings", json={"values": {"api_key": "k", "api_secret": "s", "top_n": "5"}}).json()
         assert s["has_api_secret"] and "api_secret" not in s and s["top_n"] == "5"
         assert c.post("/api/settings", json={"values": {"schedule_time": "25:00"}}).status_code == 400
-        r = c.get("/login", follow_redirects=False)
+        r = c.get("/upstox/login", follow_redirects=False)
         assert r.status_code in (302, 307) and "client_id=k" in r.headers["location"]
         assert c.get("/api/scan/status").json()["running"] is False
         assert c.get("/api/status").json()["scan"]["running"] is False
+        assert c.get("/healthz").json()["ok"] is True

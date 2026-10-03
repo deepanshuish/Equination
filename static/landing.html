@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Equination — daily NSE stock picks with a stop, a target and a track record</title>
+<meta name="description" content="Equination scans NSE every trading day for quality stocks in an uptrend that just pulled back, checks fundamentals, promoter behaviour and news sentiment, and gives you an entry, stop and target. Bring your own Upstox key.">
+<link rel="stylesheet" href="/static/styles.css?v=8">
+</head>
+<body class="landing">
+<header class="nav">
+  <a class="logo" href="/">Equi<span>nation</span></a>
+  <nav>
+    <a href="#how">How it works</a>
+    <a href="#views">Three views</a>
+    <a href="#honest">The honest part</a>
+    <a href="/login" class="btn ghost">Log in</a>
+    <a href="/signup" class="btn">Get started</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero">
+    <p class="eyebrow">For NSE swing traders · bring your own Upstox key</p>
+    <h1>Every trading day, a short list of stocks with an entry, a stop and a target.</h1>
+    <p class="lede">Equination scans ~200 liquid NSE stocks at the close for one specific setup — a quality company in an uptrend that just pulled back and printed a bullish reversal candle — then filters on fundamentals, promoter behaviour and news sentiment. It grades its own past picks so you can see whether it's actually working.</p>
+    <div class="cta">
+      <a href="/signup" class="btn big">Create a free account</a>
+      <a href="#how" class="btn ghost big">See how it works</a>
+    </div>
+    <p class="fine">No orders are placed. Your Upstox and Marketaux keys stay encrypted in your account. Educational tool, not investment advice.</p>
+  </section>
+
+  <section class="shot">
+    <img src="/static/img/app.png" alt="Equination dashboard showing ranked picks with entry, stop and target" loading="lazy">
+  </section>
+
+  <section id="how" class="block">
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step"><span>1</span><h3>Connect Upstox</h3><p>Create a free developer app on Upstox and log in once a day. Equination pulls daily candles, key ratios and shareholding patterns through your key — nothing is scraped.</p></div>
+      <div class="step"><span>2</span><h3>Scan at the close</h3><p>Every weekday at a time you choose, it looks for the pullback-reversal setup: 50 DMA over 200 DMA, a 3–12% dip, RSI(2) oversold, then a hammer, engulfing, piercing or morning-star candle on volume.</p></div>
+      <div class="step"><span>3</span><h3>Gate on quality</h3><p>Loss-makers, over-leveraged names, promoters cutting stake, pledged shares and clusters of negative news are removed before anything reaches your list.</p></div>
+      <div class="step"><span>4</span><h3>Get a plan, not a tip</h3><p>Each pick shows the entry, a stop under the pattern low, a target at the recent high or 2× risk, a hold-until date and a position size that risks ~1% of your capital.</p></div>
+    </div>
+  </section>
+
+  <section id="views" class="block alt">
+    <h2>Three views of the same scan</h2>
+    <div class="cards3">
+      <div class="card"><h3>Quant</h3><p>Numbers only. Technical score, ratio gates, position sizing. Nothing qualitative.</p></div>
+      <div class="card"><h3>Sentiment</h3><p>News only. Marketaux articles scored per company with a 3-day half-life, plus a whole-market sweep of the most positive and most negative names.</p></div>
+      <div class="card"><h3>Cumulative</h3><p>The blend: quant percentile, confidence-weighted sentiment and a fundamentals quality score, with weights you control.</p></div>
+    </div>
+  </section>
+
+  <section id="honest" class="block">
+    <h2>The honest part</h2>
+    <div class="honest">
+      <p><strong>No strategy makes a fixed return every month.</strong> The setup Equination trades has, historically, a win rate around 55–65% with winners slightly larger than losers. That compounds to a realistic 1–3% a month on average — <em>with losing months</em> — only if you take the trades consistently and respect the stops.</p>
+      <p><strong>Backtest and track record are built in.</strong> Run the rules on years of your own downloaded data before trusting them, and watch the live performance tab grade every pick the app has made. If the numbers aren't there, don't trade it.</p>
+      <p><strong>You bring the data.</strong> Upstox's API and Marketaux's free tier are enough; your keys are stored encrypted and used only for your scans.</p>
+    </div>
+    <div class="cta center"><a href="/signup" class="btn big">Start scanning</a></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>© Equination</span>
+  <a href="/legal">Disclaimer &amp; privacy</a>
+  <a href="https://github.com/deepanshuish/Equination" rel="noopener">Source</a>
+</footer>
+</body>
+</html>

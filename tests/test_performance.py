@@ -25,7 +25,7 @@ def test_grade_stop_target_time_and_open():
     _bars("NSE_EQ|TIM", [[100, 101, 99, 100], [100, 102, 99, 101], [101, 103, 100, 102], [102, 104, 101, 103], [103, 105, 102, 104]])  # 4 days, no stop/target
     _bars("NSE_EQ|OPN", [[100, 101, 99, 100], [100, 102, 99, 101]])                                  # only 1 day after signal
     _bars(NIFTY_KEY, [[1000, 1010, 990, 1000], [1000, 1010, 990, 1005], [1005, 1020, 1000, 1015], [1015, 1020, 1000, 1010], [1010, 1030, 1005, 1025]])
-    sid = db.create_scan({"mode": "swing", "hold_days": 4, "top_n": 10})
+    sid = db.create_scan(7, {"mode": "swing", "hold_days": 4, "top_n": 10})
     picks = [
         {"rank": 1, "cum_rank": 1, "instrument_key": "NSE_EQ|TGT", "symbol": "TGT", "entry": 100, "stop_loss": 95, "target": 110, "sentiment_verdict": "positive"},
         {"rank": 2, "cum_rank": 0, "instrument_key": "NSE_EQ|STP", "symbol": "STP", "entry": 100, "stop_loss": 95, "target": 110, "sentiment_verdict": "no_news"},
@@ -35,7 +35,8 @@ def test_grade_stop_target_time_and_open():
     ]
     db.finish_scan(sid, "done", "ok", {"state": "RISK_ON"}, {"mode": "swing", "data_as_of": "2026-01-05"}, picks)
 
-    rep = performance.grade_all()
+    rep = performance.grade_all(7)
+    assert performance.grade_all(8)["outcomes"] == []  # other users see nothing
     by = {o["symbol"]: o for o in rep["outcomes"]}
     assert set(by) == {"TGT", "STP", "TIM", "OPN"}
     assert by["TGT"]["exit_reason"] == "target" and by["TGT"]["exit"] == 110 and by["TGT"]["entry"] == 101 and by["TGT"]["days_held"] == 2

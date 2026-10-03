@@ -84,14 +84,14 @@ def _simulate(bars: pd.DataFrame, as_of: pd.Timestamp, stop: float | None, targe
             "exit_reason": reason, "days_held": days, "ret_pct": ret}
 
 
-def grade_all(limit_scans: int = 200) -> dict:
-    scans = [s for s in db.list_scans(limit_scans) if s["status"] == "done"]
+def grade_all(user_id: int, limit_scans: int = 200) -> dict:
+    scans = [s for s in db.list_scans(user_id, limit_scans) if s["status"] == "done"]
     if not scans:
         return {"outcomes": [], "stats": {}, "by_list": {}, "curve": []}
     keys: set[str] = set()
     full: list[dict] = []
     for s in scans:
-        detail = db.get_scan(s["id"])
+        detail = db.get_scan(user_id, s["id"])
         if not detail:
             continue
         full.append(detail)

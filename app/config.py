@@ -14,11 +14,6 @@ HOST = os.environ.get("EQUINATION_HOST", "127.0.0.1")
 # Hosting platforms (Railway, Render, Fly) inject PORT; honour it when set.
 PORT = int(os.environ.get("EQUINATION_PORT") or os.environ.get("PORT") or "8000")
 
-# When set, every page and API call requires HTTP Basic auth with this password
-# (any username). Required if you expose the app beyond localhost - it stores
-# your Upstox secret and token.
-PASSWORD = os.environ.get("EQUINATION_PASSWORD", "")
-
 # Public base URL, used to build the default OAuth redirect URI when deployed
 # (e.g. https://equination.fly.dev). Falls back to the local host/port.
 PUBLIC_URL = os.environ.get("EQUINATION_PUBLIC_URL", "").rstrip("/") or f"http://{HOST}:{PORT}"

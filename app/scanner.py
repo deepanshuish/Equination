@@ -1,7 +1,8 @@
-"""Orchestrates a daily scan: refresh instruments + candles, score, gate on
-fundamentals / promoter data, persist.
+"""Orchestrates a scan for one user: refresh instruments + candles, score,
+gate on fundamentals / promoter data, add news sentiment, persist.
 
-Runs in a background thread; `state` exposes progress to the UI.
+Scans run on a small worker pool so many users cannot stampede the shared
+Upstox/Marketaux rate limits; each user has their own progress state.
 """
 from __future__ import annotations
 
@@ -21,12 +22,16 @@ from .universe import select_universe
 from .upstox_client import AuthError, UpstoxError, fetch_daily_candles, fetch_nse_equities
 
 log = logging.getLogger("equination.scanner")
+MAX_CONCURRENT_SCANS = 2
+_pool = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_SCANS, thread_name_prefix="equination-scan")
+_instruments_lock = threading.Lock()
 
 
 class ScanState:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.running = False
+        self.queued = False
         self.phase = "idle"
         self.done = 0
         self.total = 0
@@ -38,9 +43,9 @@ class ScanState:
     def snapshot(self) -> dict:
         with self.lock:
             return {
-                "running": self.running, "phase": self.phase, "done": self.done, "total": self.total,
-                "message": self.message, "errors": self.errors[-10:], "error_count": len(self.errors),
-                "scan_id": self.scan_id, "started_at": self.started_at,
+                "running": self.running or self.queued, "queued": self.queued, "phase": self.phase,
+                "done": self.done, "total": self.total, "message": self.message, "errors": self.errors[-10:],
+                "error_count": len(self.errors), "scan_id": self.scan_id, "started_at": self.started_at,
             }
 
     def set(self, **kw) -> None:
@@ -49,20 +54,30 @@ class ScanState:
                 setattr(self, k, v)
 
 
-state = ScanState()
+_states: dict[int, ScanState] = {}
+_states_lock = threading.Lock()
 
 
+def state_for(user_id: int) -> ScanState:
+    with _states_lock:
+        if user_id not in _states:
+            _states[user_id] = ScanState()
+        return _states[user_id]
+
+
+# -------------------------------------------------------------- data refresh
 def refresh_instruments(force: bool = False) -> pd.DataFrame:
-    inst = db.get_instruments()
-    stale = inst.empty or (
-        pd.Timestamp(inst["updated_at"].max()) < pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=7)
-    )
-    if force or stale:
-        rows = fetch_nse_equities()
-        if rows:
-            db.upsert_instruments(rows)
-            inst = db.get_instruments()
-    return inst
+    with _instruments_lock:
+        inst = db.get_instruments()
+        stale = inst.empty or (
+            pd.Timestamp(inst["updated_at"].max()) < pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=7)
+        )
+        if force or stale:
+            rows = fetch_nse_equities()
+            if rows:
+                db.upsert_instruments(rows)
+                inst = db.get_instruments()
+        return inst
 
 
 def _refresh_one(key: str, last: dict[str, str], token: str) -> tuple[str, int]:
@@ -77,14 +92,20 @@ def _refresh_one(key: str, last: dict[str, str], token: str) -> tuple[str, int]:
     return key, db.upsert_candles(key, df)
 
 
-def refresh_candles(keys: list[str], token: str, workers: int = 4) -> None:
-    """Incrementally updates candles for `keys` (Nifty is always included)."""
+def refresh_candles(keys: list[str], token: str, state: ScanState, workers: int = 4) -> None:
+    """Incrementally updates candles for `keys` (Nifty is always included).
+
+    Symbols already updated today by another user's scan are skipped, so the
+    shared cache means the Nth user's scan is nearly free.
+    """
     keys = list(dict.fromkeys([NIFTY_KEY, *keys]))
     last = db.last_candle_dates()
-    state.set(phase="candles", done=0, total=len(keys), message="Downloading daily candles from Upstox")
+    today = str(date.today())
+    todo = [k for k in keys if last.get(k) != today]
+    state.set(phase="candles", done=len(keys) - len(todo), total=len(keys), message="Downloading daily candles from Upstox")
     auth_failed: AuthError | None = None
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(_refresh_one, k, last, token): k for k in keys}
+        futures = {ex.submit(_refresh_one, k, last, token): k for k in todo}
         for fut in as_completed(futures):
             key = futures[fut]
             try:
@@ -104,11 +125,7 @@ def refresh_candles(keys: list[str], token: str, workers: int = 4) -> None:
 
 
 def gate_fundamentals(keys: list[str], instruments: pd.DataFrame, token: str,
-                      qp: fnd.QualityParams) -> dict[str, dict]:
-    """Fetches (or reads cached) fundamentals for `keys` and assesses each.
-
-    Returns {instrument_key: {"assessment": {...}, "fundamentals": {...}}}.
-    """
+                      qp: fnd.QualityParams, state: ScanState) -> dict[str, dict]:
     meta = instruments.set_index("instrument_key")
     state.set(phase="fundamentals", done=0, total=len(keys), message="Checking fundamentals and promoter holdings")
     out: dict[str, dict] = {}
@@ -155,21 +172,21 @@ def _excluded_set(settings: dict[str, str]) -> set[str]:
     return {s.strip().upper() for s in (settings.get("exclude_symbols") or "").split(",") if s.strip()}
 
 
-def run_scan(trigger: str = "manual") -> int:
-    """Full pipeline. Returns the scan id. Never raises - failures are stored on the scan row."""
-    if state.running:
-        raise RuntimeError("A scan is already running")
-    settings = db.get_settings()
+# ---------------------------------------------------------------- pipeline
+def run_scan(user_id: int, trigger: str = "manual") -> int:
+    """Full pipeline for one user. Returns the scan id. Never raises."""
+    state = state_for(user_id)
+    settings = db.get_settings(user_id)
     mode = settings.get("mode", "swing")
     qp = fnd.QualityParams(require_fundamentals=settings.get("require_fundamentals", "0") == "1")
     params = swing.SwingParams.from_settings(settings) if mode == "swing" else StrategyParams.from_settings(settings)
-    scan_id = db.create_scan({**params.to_dict(), "mode": mode, "universe": settings["universe"], "trigger": trigger})
-    state.set(running=True, phase="starting", done=0, total=0, message="", errors=[], scan_id=scan_id,
+    scan_id = db.create_scan(user_id, {**params.to_dict(), "mode": mode, "universe": settings["universe"], "trigger": trigger})
+    state.set(running=True, queued=False, phase="starting", done=0, total=0, message="", errors=[], scan_id=scan_id,
               started_at=datetime.now().isoformat(timespec="seconds"))
     try:
         token = settings.get("access_token", "")
         if not token:
-            raise AuthError("No Upstox access token. Open Settings and log in first.")
+            raise AuthError("No Upstox access token. Open Settings and connect Upstox first.")
 
         state.set(phase="instruments", message="Refreshing NSE instrument master")
         instruments = refresh_instruments()
@@ -180,7 +197,7 @@ def run_scan(trigger: str = "manual") -> int:
         universe = universe[~universe["symbol"].str.upper().isin(excluded)]
         names = universe.set_index("instrument_key")
 
-        refresh_candles(universe["instrument_key"].tolist(), token)
+        refresh_candles(universe["instrument_key"].tolist(), token, state)
 
         state.set(phase="scoring", message="Scoring the universe")
         candles = db.load_candles([NIFTY_KEY, *universe["instrument_key"].tolist()])
@@ -191,11 +208,11 @@ def run_scan(trigger: str = "manual") -> int:
             raise UpstoxError("No candle data was downloaded. Check the errors list and your token.")
 
         if mode == "swing":
-            picks, stats = _scan_swing(stock_candles, names, token, params, qp, regime)
+            picks, stats = _scan_swing(stock_candles, names, token, params, qp, regime, state)
         else:
-            picks, stats = _scan_positional(stock_candles, universe, token, params, qp, regime)
+            picks, stats = _scan_positional(stock_candles, universe, token, params, qp, regime, state)
 
-        picks, sstats = add_sentiment_and_rank(picks, settings, params.top_n)
+        picks, sstats = add_sentiment_and_rank(picks, settings, params.top_n, state)
         stats.update(sstats)
         stats["mode"] = mode
         stats["missing_symbols"] = missing
@@ -208,7 +225,7 @@ def run_scan(trigger: str = "manual") -> int:
         db.finish_scan(scan_id, "done", msg, regime.to_dict(), stats, picks)
         if settings.get("sweep_in_scan", "0") == "1" and settings.get("marketaux_key"):
             try:
-                run_sweep(settings)
+                run_sweep(user_id, settings)
             except Exception as e:  # noqa: BLE001 - the scan itself succeeded
                 with state.lock:
                     state.errors.append(f"sweep: {e}")
@@ -217,21 +234,20 @@ def run_scan(trigger: str = "manual") -> int:
         db.finish_scan(scan_id, "needs_login", str(e), None, None, [])
         state.set(phase="needs_login", message=str(e))
     except Exception as e:  # noqa: BLE001
-        log.error("scan failed: %s\n%s", e, traceback.format_exc())
+        log.error("scan failed for user %s: %s\n%s", user_id, e, traceback.format_exc())
         db.finish_scan(scan_id, "failed", f"{type(e).__name__}: {e}", None, None, [])
         state.set(phase="failed", message=f"{type(e).__name__}: {e}")
     finally:
-        state.set(running=False)
+        state.set(running=False, queued=False)
     return scan_id
 
 
-def _scan_swing(stock_candles, names, token, p: swing.SwingParams, qp, regime):
+def _scan_swing(stock_candles, names, token, p: swing.SwingParams, qp, regime, state):
     fr = swing.SwingFrames(stock_candles, p)
     cands = swing.latest_candidates(fr, regime.allocation > 0)
     setups = cands[cands["setup"]]
-    # Verify fundamentals only for the candidates that could make the list.
     shortlist = setups.head(p.top_n * 3).index.tolist()
-    funds = gate_fundamentals(shortlist, names.reset_index(), token, qp)
+    funds = gate_fundamentals(shortlist, names.reset_index(), token, qp, state)
     picks: list[dict] = []
     gated_out = 0
     entry_date, exit_date = _hold_until(cands["as_of"].iloc[0] if len(cands) else str(date.today()), p.hold_days)
@@ -265,11 +281,11 @@ def _scan_swing(stock_candles, names, token, p: swing.SwingParams, qp, regime):
     return picks, stats
 
 
-def _scan_positional(stock_candles, universe, token, p: StrategyParams, qp, regime):
+def _scan_positional(stock_candles, universe, token, p: StrategyParams, qp, regime, state):
     feats = compute_features(stock_candles)
     scored = score_features(feats, p)
     shortlist = scored[scored["eligible"]].head(p.top_n * 3).index.tolist()
-    funds = gate_fundamentals(shortlist, universe, token, qp)
+    funds = gate_fundamentals(shortlist, universe, token, qp, state)
     bad = [k for k in shortlist if not funds[k]["assessment"]["ok"]]
     scored.loc[bad, "eligible"] = False
     scored.loc[bad, "excluded"] = "fundamentals/promoter gate"
@@ -285,12 +301,14 @@ def _scan_positional(stock_candles, universe, token, p: StrategyParams, qp, regi
     return picks, stats
 
 
-def add_sentiment_and_rank(picks: list[dict], settings: dict[str, str], top_n: int) -> tuple[list[dict], dict]:
-    """Fetches news sentiment for every gate-passing candidate, then assigns
+def add_sentiment_and_rank(picks: list[dict], settings: dict[str, str], top_n: int,
+                           state: ScanState | None = None) -> tuple[list[dict], dict]:
+    """Adds news sentiment to every gate-passing candidate and assigns
 
     * `rank`      - quant rank (numbers only), 0 when outside the top N
     * `cum_rank`  - cumulative rank blending quant score, sentiment and quality
     """
+    state = state or ScanState()
     key = settings.get("marketaux_key", "")
     days = int(float(settings.get("sentiment_days", 7) or 7))
     wq = float(settings.get("w_quant", 55)); ws = float(settings.get("w_sentiment", 30)); wf = float(settings.get("w_quality", 15))
@@ -300,7 +318,7 @@ def add_sentiment_and_rank(picks: list[dict], settings: dict[str, str], top_n: i
     scored = 0
     auth_err = ""
     n = max(len(picks), 1)
-    for i, pk in enumerate(picks):
+    for pk in picks:
         s = None
         if key and not auth_err:
             try:
@@ -312,7 +330,7 @@ def add_sentiment_and_rank(picks: list[dict], settings: dict[str, str], top_n: i
             except snt.SentimentError as e:
                 with state.lock:
                     state.errors.append(f"{pk['symbol']} sentiment: {e}")
-                s = snt.get_cached(pk["symbol"], max_age_hours=72)  # stale is better than nothing
+                s = snt.get_cached(pk["symbol"], max_age_hours=72)
         elif not key:
             s = snt.get_cached(pk["symbol"], max_age_hours=72)
         if s and s.n_scored:
@@ -324,7 +342,6 @@ def add_sentiment_and_rank(picks: list[dict], settings: dict[str, str], top_n: i
         pk["sentiment_pos"] = s.positive if s else 0
         pk["sentiment_neg"] = s.negative if s else 0
         pk["headlines"] = s.headlines if s else []
-        # quant percentile from the quant order (best = 100)
         quant_pts = 100.0 * (1 - (pk["quant_rank"] - 1) / n)
         sent_pts = snt.sentiment_points(s)
         qual_pts = float(pk.get("quality_score") or 50.0)
@@ -352,9 +369,10 @@ def add_sentiment_and_rank(picks: list[dict], settings: dict[str, str], top_n: i
     return picks, stats
 
 
-def run_sweep(settings: dict[str, str] | None = None) -> dict:
-    """Sentiment sweep of the whole universe; stores and returns the result."""
-    settings = settings or db.get_settings()
+# ------------------------------------------------------------------- sweep
+def run_sweep(user_id: int, settings: dict[str, str] | None = None) -> dict:
+    settings = settings or db.get_settings(user_id)
+    state = state_for(user_id)
     key = settings.get("marketaux_key", "")
     if not key:
         raise snt.SentimentAuthError("No Marketaux API key configured.")
@@ -366,37 +384,39 @@ def run_sweep(settings: dict[str, str] | None = None) -> dict:
         raise RuntimeError("Instrument universe is empty - run a scan first so the NSE list is cached.")
     pairs = [(r.symbol, str(r.name or "")) for r in universe.itertuples(index=False)]
     state.set(phase="sweep", done=0, total=len(pairs), message="Sweeping universe sentiment via Marketaux")
-
-    def progress(done, total):
-        state.set(done=done, total=total)
-
     res = snt.sweep(pairs, key, days=int(float(settings.get("sentiment_days", 7) or 7)),
-                    budget=int(float(settings.get("sweep_budget", 40) or 40)), progress=progress)
-    db.save_sweep(res)
+                    budget=int(float(settings.get("sweep_budget", 40) or 40)),
+                    progress=lambda d, t: state.set(done=d, total=t))
+    db.save_sweep(user_id, res)
     return res
 
 
-def start_sweep_async() -> None:
-    if state.running:
-        raise RuntimeError("A scan is already running")
+# -------------------------------------------------------------- scheduling
+def _submit(user_id: int, fn, *args) -> None:
+    state = state_for(user_id)
+    if state.running or state.queued:
+        raise RuntimeError("A scan is already running for this account")
+    state.set(queued=True, phase="queued", message="Waiting for a worker", done=0, total=0, errors=[])
+    _pool.submit(fn, user_id, *args)
 
-    def _go():
-        state.set(running=True, phase="sweep", done=0, total=0, message="", errors=[], scan_id=None,
+
+def start_scan_async(user_id: int, trigger: str = "manual") -> None:
+    _submit(user_id, run_scan, trigger)
+
+
+def start_sweep_async(user_id: int) -> None:
+    def _go(uid: int) -> None:
+        state = state_for(uid)
+        state.set(running=True, queued=False, phase="sweep", done=0, total=0, message="", errors=[], scan_id=None,
                   started_at=datetime.now().isoformat(timespec="seconds"))
         try:
-            res = run_sweep()
+            res = run_sweep(uid)
             state.set(phase="done", message=f"sweep done: {res['scored']} of {res['covered']} symbols scored "
                                             f"({res['method']}, {res['requests_used']} requests)")
         except Exception as e:  # noqa: BLE001
-            log.error("sweep failed: %s\n%s", e, traceback.format_exc())
+            log.error("sweep failed for user %s: %s\n%s", uid, e, traceback.format_exc())
             state.set(phase="failed", message=f"sweep failed: {e}")
         finally:
-            state.set(running=False)
+            state.set(running=False, queued=False)
 
-    threading.Thread(target=_go, daemon=True, name="equination-sweep").start()
-
-
-def start_scan_async(trigger: str = "manual") -> None:
-    if state.running:
-        raise RuntimeError("A scan is already running")
-    threading.Thread(target=run_scan, args=(trigger,), daemon=True, name="equination-scan").start()
+    _submit(user_id, _go)

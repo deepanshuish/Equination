@@ -9,6 +9,7 @@
   async function api(path, opts = {}) {
     const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
     const body = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = '/login?next=/app'; throw new Error('Please log in'); }
     if (!r.ok) throw new Error(body.detail || r.statusText);
     return body;
   }
@@ -232,7 +233,8 @@
   async function sysStatus() {
     const s = await api('/api/settings').catch(() => null);
     if (!s) return;
-    $('#sys').innerHTML = `<span>upstox <b class="${s.has_access_token ? 'ok' : 'bad'}">${s.has_access_token ? 'online' : 'no token'}</b></span><span>marketaux <b class="${s.has_marketaux_key ? 'ok' : 'warn'}">${s.has_marketaux_key ? 'online' : 'off'}</b></span><span>cron <b class="${s.schedule?.enabled ? 'ok' : 'warn'}">${s.schedule?.enabled ? s.schedule_time + ' ist' : 'off'}</b></span>`;
+    $('#sys').innerHTML = `<span>Upstox <b class="${s.has_access_token ? 'ok' : 'bad'}">${s.has_access_token ? 'connected' : 'not connected'}</b></span><span>Marketaux <b class="${s.has_marketaux_key ? 'ok' : 'warn'}">${s.has_marketaux_key ? 'connected' : 'off'}</b></span><span>Daily scan <b class="${s.schedule?.enabled ? 'ok' : 'warn'}">${s.schedule?.enabled ? s.schedule_time + ' IST' : 'off'}</b></span>`;
+    if (!$('#user').dataset.loaded) { api('/api/me').then((m) => { $('#user').dataset.loaded = '1'; $('#user').innerHTML = `<span>${esc(m.email)}</span><a href="/logout">Log out</a>`; }).catch(() => {}); }
   }
 
   // -------------------------------------------------------------- sentiment lookup
@@ -283,12 +285,12 @@
     const x = (i) => L + (i / (curve.length - 1)) * (W - L - R);
     const y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
     return `<svg class="chart" style="height:200px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <line x1="${L}" x2="${W - R}" y1="${y(1)}" y2="${y(1)}" stroke="#1f4a2e" stroke-dasharray="4 4"/>
-      <path d="${curve.map((c, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(c.equity).toFixed(1)}`).join(' ')}" fill="none" stroke="#39ff14" stroke-width="2"/>
-      <text x="${L - 6}" y="${y(1) + 4}" fill="#5f8a6d" font-size="11" text-anchor="end">1.00x</text>
-      <text x="${L - 6}" y="${y(y1) + 10}" fill="#5f8a6d" font-size="11" text-anchor="end">${y1.toFixed(2)}x</text>
-      <text x="${L}" y="${H - 8}" fill="#5f8a6d" font-size="11">${curve[0].date}</text>
-      <text x="${W - R}" y="${H - 8}" fill="#5f8a6d" font-size="11" text-anchor="end">${curve[curve.length - 1].date}</text></svg>`;
+      <line x1="${L}" x2="${W - R}" y1="${y(1)}" y2="${y(1)}" stroke="#d1d5db" stroke-dasharray="4 4"/>
+      <path d="${curve.map((c, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(c.equity).toFixed(1)}`).join(' ')}" fill="none" stroke="#f26625" stroke-width="2"/>
+      <text x="${L - 6}" y="${y(1) + 4}" fill="#6b7280" font-size="11" text-anchor="end">1.00x</text>
+      <text x="${L - 6}" y="${y(y1) + 10}" fill="#6b7280" font-size="11" text-anchor="end">${y1.toFixed(2)}x</text>
+      <text x="${L}" y="${H - 8}" fill="#6b7280" font-size="11">${curve[0].date}</text>
+      <text x="${W - R}" y="${H - 8}" fill="#6b7280" font-size="11" text-anchor="end">${curve[curve.length - 1].date}</text></svg>`;
   }
   async function loadPerformance() {
     const out = $('#perf-out'); out.textContent = 'grading…';
@@ -321,13 +323,13 @@
     const path = (key) => curve.map((c, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(c[key]).toFixed(1)}`).join(' ');
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => y0 + f * (y1 - y0));
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#16301f"/><text x="${L - 6}" y="${y(v) + 4}" fill="#5f8a6d" font-size="11" text-anchor="end">${v.toFixed(2)}x</text>`).join('')}
-      <path d="${path('nifty')}" fill="none" stroke="#5f8a6d" stroke-width="1.5"/>
-      <path d="${path('strategy')}" fill="none" stroke="#39ff14" stroke-width="2"/>
-      <text x="${L}" y="${H - 8}" fill="#5f8a6d" font-size="11">${curve[0].date}</text>
-      <text x="${W - R}" y="${H - 8}" fill="#5f8a6d" font-size="11" text-anchor="end">${curve[curve.length - 1].date}</text>
-      <text x="${W - R - 4}" y="${T + 12}" fill="#39ff14" font-size="11" text-anchor="end">strategy</text>
-      <text x="${W - R - 4}" y="${T + 26}" fill="#5f8a6d" font-size="11" text-anchor="end">nifty 50</text>
+      ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#e5e7eb"/><text x="${L - 6}" y="${y(v) + 4}" fill="#6b7280" font-size="11" text-anchor="end">${v.toFixed(2)}x</text>`).join('')}
+      <path d="${path('nifty')}" fill="none" stroke="#9ca3af" stroke-width="1.5"/>
+      <path d="${path('strategy')}" fill="none" stroke="#f26625" stroke-width="2"/>
+      <text x="${L}" y="${H - 8}" fill="#6b7280" font-size="11">${curve[0].date}</text>
+      <text x="${W - R}" y="${H - 8}" fill="#6b7280" font-size="11" text-anchor="end">${curve[curve.length - 1].date}</text>
+      <text x="${W - R - 4}" y="${T + 12}" fill="#f26625" font-size="11" text-anchor="end">strategy</text>
+      <text x="${W - R - 4}" y="${T + 26}" fill="#6b7280" font-size="11" text-anchor="end">nifty 50</text>
     </svg>`;
   }
   function renderSwingBacktest(r) {
@@ -396,10 +398,10 @@
     $('#s-schedule_enabled').checked = s.schedule_enabled === '1';
     $('#s-sweep_in_scan').checked = s.sweep_in_scan === '1';
     $('#s-require_fundamentals').checked = s.require_fundamentals === '1';
-    $('#s-api_secret').placeholder = s.has_api_secret ? '(saved — leave blank to keep)' : 'paste your api secret';
-    $('#s-marketaux_key').placeholder = s.has_marketaux_key ? '(saved — leave blank to keep)' : 'paste your marketaux token';
-    $('#token-state').textContent = s.has_access_token ? `access token saved${s.token_issued_at ? ' ' + ist(s.token_issued_at) : ''}. upstox tokens expire at 03:30 ist daily; log in again when a scan reports "needs login".` : 'no access token yet — save your key and secret, then click login with upstox.';
-    $('#news-state').textContent = s.has_marketaux_key ? 'key saved' : 'no key — sentiment disabled';
+    $('#s-api_secret').placeholder = s.has_api_secret ? '(saved — leave blank to keep)' : 'Paste your API secret';
+    $('#s-marketaux_key').placeholder = s.has_marketaux_key ? '(saved — leave blank to keep)' : 'Paste your Marketaux token';
+    $('#token-state').textContent = s.has_access_token ? `Connected${s.token_issued_at ? ' ' + ist(s.token_issued_at) : ''}. Upstox tokens expire at 03:30 IST daily; reconnect when a scan reports "needs login".` : 'Not connected yet — save your key and secret, then click Connect Upstox.';
+    $('#news-state').textContent = s.has_marketaux_key ? 'Token saved' : 'No token — sentiment disabled';
     $('#schedule-state').textContent = s.schedule?.enabled && s.schedule.next_run ? `next automatic scan: ${ist(s.schedule.next_run)}` : 'automatic scans disabled';
     $('#bt-desc').textContent = s.mode === 'swing'
       ? 'replays every historical pullback + reversal-candle setup on the cached candles with the same stop, target and holding period, and compares it with buying the same stocks on random days.'
@@ -438,7 +440,7 @@
 
   // ------------------------------------------------------------------ boot
   const q = new URLSearchParams(location.search);
-  if (q.get('login') === 'ok') { toast('logged in to upstox'); history.replaceState({}, '', '/'); }
-  else if (q.get('login') === 'error') { toast('upstox login failed: ' + (q.get('msg') || ''), true); history.replaceState({}, '', '/'); showTab('settings'); }
+  if (q.get('login') === 'ok') { toast('Upstox connected'); history.replaceState({}, '', '/app'); }
+  else if (q.get('login') === 'error') { toast('Upstox login failed: ' + (q.get('msg') || ''), true); history.replaceState({}, '', '/app'); showTab('settings'); }
   loadLatest(); pollStatus(); sysStatus(); loadSweep();
 })();

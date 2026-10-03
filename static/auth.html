@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Equination — sign in</title>
+<link rel="stylesheet" href="/static/styles.css?v=8">
+</head>
+<body class="landing">
+<header class="nav"><a class="logo" href="/">Equi<span>nation</span></a></header>
+<main class="authwrap">
+  <form id="auth-form" class="authcard" autocomplete="on">
+    <h1 id="auth-title">Create your account</h1>
+    <p id="auth-sub" class="muted">Free during beta. You'll connect your own Upstox key next.</p>
+    <label>Email <input id="email" name="email" type="email" required autocomplete="email"></label>
+    <label>Password <input id="password" name="password" type="password" required minlength="8" autocomplete="new-password"></label>
+    <label id="invite-row" class="hidden">Invite code <input id="invite" name="invite" autocomplete="off"></label>
+    <div id="auth-error" class="error hidden"></div>
+    <button class="btn big full" id="auth-btn" type="submit">Create account</button>
+    <p class="muted small" id="auth-switch"></p>
+    <p class="fine">By continuing you agree this is an educational tool, not investment advice. <a href="/legal">Disclaimer &amp; privacy</a>.</p>
+  </form>
+</main>
+<script>
+(() => {
+  const mode = location.pathname === '/signup' ? 'signup' : 'login';
+  const $ = (s) => document.querySelector(s);
+  const next = new URLSearchParams(location.search).get('next') || '/app';
+  if (mode === 'login') {
+    $('#auth-title').textContent = 'Welcome back';
+    $('#auth-sub').textContent = 'Log in to see today\'s picks.';
+    $('#auth-btn').textContent = 'Log in';
+    $('#password').autocomplete = 'current-password';
+    $('#auth-switch').innerHTML = 'New here? <a href="/signup">Create an account</a>';
+  } else {
+    $('#auth-switch').innerHTML = 'Already have an account? <a href="/login">Log in</a>';
+    fetch('/api/auth/config').then((r) => r.json()).then((c) => {
+      if (c.invite_required) $('#invite-row').classList.remove('hidden');
+      if (!c.signup_allowed) { $('#auth-error').textContent = 'Sign-ups are closed right now.'; $('#auth-error').classList.remove('hidden'); $('#auth-btn').disabled = true; }
+    }).catch(() => {});
+  }
+  $('#auth-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#auth-btn'); btn.disabled = true; $('#auth-error').classList.add('hidden');
+    try {
+      const r = await fetch(`/api/auth/${mode}`, { method: 'POST', body: new FormData(e.target) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || r.statusText);
+      location.href = next.startsWith('/') ? next : '/app';
+    } catch (err) { $('#auth-error').textContent = err.message; $('#auth-error').classList.remove('hidden'); btn.disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>
