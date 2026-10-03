@@ -88,15 +88,68 @@
     if (mode === 'swing') return `<td class="num">${fmt(r.entry, 2)}</td><td class="num neg">${fmt(r.stop_loss, 2)}</td><td class="num pos">${fmt(r.target, 2)}</td><td class="num">${fmt(r.reward_risk)}</td><td>${r.hold_until || '-'}</td>`;
     return `<td class="num">${fmt(r.close, 2)}</td><td class="num neg">${fmt(r.stop_loss, 2)}</td><td class="num dim">50dma</td><td class="num dim">-</td><td class="dim">monthly</td>`;
   }
-  const PLAN_HEAD = '<th class="num">entry</th><th class="num">stop</th><th class="num">target</th><th class="num">r:r</th><th>hold until</th>';
-  const QUANT_HEAD = `<tr><th>#</th><th>symbol</th><th>setup</th><th class="num">score</th>${PLAN_HEAD}<th class="num">qty</th><th class="num">value</th><th class="num">risk</th><th>fundamentals</th><th>promoters</th><th>flags</th></tr>`;
-  const CUM_HEAD = `<tr><th>#</th><th>symbol</th><th class="num">cum</th><th class="num">quant</th><th>sentiment</th><th class="num">quality</th><th>setup</th>${PLAN_HEAD}<th class="num">qty</th><th class="num">value</th><th>headlines</th><th>flags</th></tr>`;
+  // Compact main row + expandable detail row. Columns are the decision essentials;
+  // everything else (fundamentals, promoters, news, exit rules) lives in the detail.
+  const QUANT_HEAD = '<tr><th>#</th><th>symbol</th><th>setup</th><th class="num">score</th><th class="plan">entry / stop / target</th><th class="num">r:r</th><th>hold until</th><th class="num">qty</th><th class="num">risk ₹</th><th>checks</th></tr>';
+  const CUM_HEAD = '<tr><th>#</th><th>symbol</th><th class="num">cum</th><th>quant · news · quality</th><th>setup</th><th class="plan">entry / stop / target</th><th class="num">r:r</th><th>hold until</th><th class="num">qty</th><th>checks</th></tr>';
 
+  const scoreBar = (v, max = 100) => `<span class="score">${fmt(v, 0)}<i><b style="width:${Math.max(0, Math.min(100, (v / max) * 100))}%"></b></i></span>`;
+  const setupShort = (r, mode) => mode === 'swing'
+    ? `${(r.patterns || []).map((p) => PATTERN_LABEL[p] || p).join(', ') || '-'}<br><small class="muted">dip ${fmt(r.pullback_pct)}% · rsi2 ${fmt(r.rsi2_prev, 0)}→${fmt(r.rsi2, 0)} · vol ${fmt(r.vol_ratio)}×</small>`
+    : `momentum<br><small class="muted">12-1m ${fmt(r.ret_12_1)}% · 6m ${fmt(r.ret_6)}% · 3m ${fmt(r.ret_3)}%</small>`;
+  const planShort = (r, mode) => mode === 'swing'
+    ? `<span class="plan"><span class="e">${fmt(r.entry, 2)}</span><small>/</small><span class="s">${fmt(r.stop_loss, 2)}</span><small>/</small><span class="t">${fmt(r.target, 2)}</span></span>`
+    : `<span class="plan"><span class="e">${fmt(r.close, 2)}</span><small>/</small><span class="s">${fmt(r.stop_loss, 2)}</span><small>/</small><span class="dim">50dma</span></span>`;
+  function checksShort(r) {
+    const hard = (r.quality_flags || []).length;
+    const sv = r.sentiment_verdict || 'no_news';
+    return `<span class="chip ${hard ? 'warn' : 'ok'}" title="${esc((r.quality_flags || []).join('; '))}">fund ${hard ? hard + ' flag' + (hard > 1 ? 's' : '') : 'ok'}</span><span class="chip ${sv === 'positive' ? 'ok' : sv === 'negative' ? 'warn' : ''}">news ${sv === 'no_news' ? 'none' : sv}</span>`;
+  }
+  function detailRow(r, mode, cols) {
+    const kv = (pairs) => `<div class="kv">${pairs.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>`;
+    const fund = kv([['ROE', r.roe != null ? fmt(r.roe) + '%' : null], ['ROCE', r.roce != null ? fmt(r.roce) + '%' : null], ['P/E', r.pe != null ? fmt(r.pe) : null], ['D/E', r.debt_equity != null ? fmt(r.debt_equity, 2) : null], ['net margin', r.net_margin != null ? fmt(r.net_margin) + '%' : null], ['EPS growth', r.eps_growth != null ? fmt(r.eps_growth, 0) + '%' : null], ['revenue growth', r.revenue_growth != null ? fmt(r.revenue_growth, 0) + '%' : null], ['quality score', r.quality_score != null ? fmt(r.quality_score, 0) + '/100' : null]]);
+    const prom = kv([['promoter holding', r.promoter_pct != null ? fmt(r.promoter_pct) + '%' : 'n/a'], ['change (2 qtrs)', r.promoter_change_pp != null ? pct(r.promoter_change_pp) + ' pp' : null], ['pledged', r.pledge_pct != null ? fmt(r.pledge_pct, 0) + '%' : null], ['FII', r.fii_pct != null ? fmt(r.fii_pct) + '%' : null], ['DII', r.dii_pct != null ? fmt(r.dii_pct) + '%' : null]]);
+    const tech = mode === 'swing'
+      ? kv([['close', fmt(r.close, 2)], ['50 dma', fmt(r.sma50, 2)], ['200 dma', fmt(r.sma200, 2)], ['6m return', pct(r.ret_6)], ['1m return', pct(r.ret_1)], ['ATR %', fmt(r.atr_pct, 2) + '%'], ['turnover', '₹' + fmt(r.turnover_cr) + ' cr/day'], ['position', `${r.quantity} × ${fmt(r.entry, 2)} = ${inr(r.position_value)}`]])
+      : kv([['close', fmt(r.close, 2)], ['50 dma', fmt(r.sma50, 2)], ['200 dma', fmt(r.sma200, 2)], ['vol (ann.)', fmt(r.vol) + '%'], ['vs 52w high', pct(r.from_high)], ['ATR', fmt(r.atr, 2)], ['turnover', '₹' + fmt(r.turnover_cr) + ' cr/day'], ['position', `${r.quantity} × ${fmt(r.close, 2)} = ${inr(r.position_value)}`]]);
+    const flags = (r.quality_flags || []).length ? (r.quality_flags || []).map((x) => `<span class="flag">${esc(x)}</span>`).join(' ') : '<span class="pos">no flags</span>';
+    return `<tr class="detail"><td colspan="${cols}"><div class="dgrid">
+      <div><h4>trade plan</h4>${kv([['entry (next open)', fmt(r.entry ?? r.close, 2)], ['stop-loss', fmt(r.stop_loss, 2)], ['target', r.target != null ? fmt(r.target, 2) : null], ['reward : risk', r.reward_risk != null ? fmt(r.reward_risk) : null], ['hold until', r.hold_until], ['risk if stopped', inr(r.risk_amount)]])}<p class="hint">${esc(r.exit_rules || '')}</p></div>
+      <div><h4>technicals</h4>${tech}</div>
+      <div><h4>fundamentals</h4>${fund}<div style="margin-top:4px">${flags}</div></div>
+      <div><h4>promoters &amp; holders</h4>${prom}</div>
+      <div><h4>news (${r.sentiment_n || 0} scored of ${r.sentiment_articles || 0})</h4>${sentBadge(r)}${headlinesCell(r, 4)}</div>
+    </div></td></tr>`;
+  }
   function quantRow(r, mode) {
-    return `<tr><td>${r.rank}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td>${setupCell(r, mode)}</td><td class="num">${fmt(r.score, mode === 'swing' ? 0 : 2)}</td>${planCells(r, mode)}<td class="num">${r.quantity}</td><td class="num">${inr(r.position_value)}</td><td class="num">${inr(r.risk_amount)}</td><td class="small">${fundCell(r)}</td><td class="small">${promoterCell(r)}</td><td class="small">${flagsCell(r)}</td></tr>`;
+    return `<tr class="main" data-key="${esc(r.instrument_key)}"><td>${r.rank}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td>${setupShort(r, mode)}</td><td class="num">${scoreBar(r.score, mode === 'swing' ? 100 : 4)}</td><td>${planShort(r, mode)}</td><td class="num">${r.reward_risk != null ? fmt(r.reward_risk) : '-'}</td><td>${r.hold_until || '<span class="dim">monthly</span>'}</td><td class="num">${r.quantity}</td><td class="num">${inr(r.risk_amount)}</td><td>${checksShort(r)}</td></tr>` + detailRow(r, mode, 10);
   }
   function cumRow(r, mode) {
-    return `<tr><td>${r.cum_rank}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td class="num"><b>${fmt(r.cum_score, 0)}</b></td><td class="num">${fmt(r.quant_points, 0)}<br><span class="dim small">#${r.quant_rank}</span></td><td class="small">${sentBadge(r)}</td><td class="num">${fmt(r.quality_score, 0)}</td><td>${setupCell(r, mode)}</td>${planCells(r, mode)}<td class="num">${r.quantity}</td><td class="num">${inr(r.position_value)}</td><td class="small">${headlinesCell(r, 1)}</td><td class="small">${flagsCell(r)}</td></tr>`;
+    const sv = r.sentiment_verdict || 'no_news';
+    return `<tr class="main" data-key="${esc(r.instrument_key)}"><td>${r.cum_rank}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td class="num">${scoreBar(r.cum_score)}</td><td><small class="muted">q</small> ${fmt(r.quant_points, 0)} <span class="dim">#${r.quant_rank}</span> · <small class="muted">n</small> <span class="verd ${sv}">${sv.replace('_', ' ')}</span>${r.sentiment_score != null ? ` <span class="${r.sentiment_score > 0 ? 'pos' : 'neg'}">${r.sentiment_score >= 0 ? '+' : ''}${fmt(r.sentiment_score, 2)}</span>` : ''} · <small class="muted">f</small> ${fmt(r.quality_score, 0)}</td><td>${setupShort(r, mode)}</td><td>${planShort(r, mode)}</td><td class="num">${r.reward_risk != null ? fmt(r.reward_risk) : '-'}</td><td>${r.hold_until || '<span class="dim">monthly</span>'}</td><td class="num">${r.quantity}</td><td>${checksShort(r)}</td></tr>` + detailRow(r, mode, 10);
+  }
+  document.addEventListener('click', (e) => {
+    const tr = e.target.closest('tr.main'); if (!tr || e.target.closest('a')) return;
+    tr.classList.toggle('open'); tr.nextElementSibling?.classList.toggle('open');
+  });
+
+  async function renderSummary(scan) {
+    const st = scan.stats || {}, rg = scan.regime || {};
+    const mode = st.mode || scan.params?.mode || 'positional';
+    const perf = await api('/api/performance').catch(() => null);
+    const ps = perf?.stats || {};
+    const settings = await api('/api/settings').catch(() => ({}));
+    const cells = [
+      ['regime', `<span class="${rg.state || ''}">${(rg.state || '-').replace('_', ' ')}</span>`, rg.nifty_close ? `nifty ${fmt(rg.nifty_close, 0)} · alloc ${Math.round((rg.allocation || 0) * 100)}%` : ''],
+      ['picks', `${st.quant_picks ?? 0} <span class="dim">/</span> ${st.cumulative_picks ?? 0}`, 'quant / cumulative'],
+      ['mode', mode === 'swing' ? `${scan.params?.hold_days || 4}-day swing` : 'positional', `${st.universe || 0} scanned · ${st.gated_out ?? 0} gated out`],
+      ['data as of', st.data_as_of || '-', `scan ${new Date(scan.run_at).toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' })} ist`],
+      ['track record', ps.trades ? `<span class="${ps.avg_ret_pct >= 0 ? 'pos' : 'neg'}">${ps.avg_ret_pct >= 0 ? '+' : ''}${fmt(ps.avg_ret_pct, 2)}%</span>` : '<span class="dim">-</span>', ps.trades ? `${ps.trades} closed · win ${ps.win_rate_pct}% · pf ${ps.profit_factor ?? '-'}` : 'no closed picks yet'],
+      ['next scan', settings.schedule?.enabled && settings.schedule.next_run ? new Date(settings.schedule.next_run).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'off', settings.schedule?.enabled ? 'cron, ist' : 'enable in settings'],
+    ];
+    const el = $('#summary');
+    el.innerHTML = cells.map(([k, v, b]) => `<div class="s"><div class="k">${k}</div><div class="v">${v}</div><div class="b">${b}</div></div>`).join('');
+    el.classList.remove('hidden');
   }
   function sentRow(r, i) {
     return `<tr><td>${i + 1}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td>${sentBadge(r)}</td><td class="num">${r.sentiment_score == null ? '-' : fmt(r.sentiment_score, 2)}</td><td class="num">${r.sentiment_n || 0}/${r.sentiment_articles || 0}</td><td class="num"><span class="pos">${r.sentiment_pos || 0}</span> / <span class="neg">${r.sentiment_neg || 0}</span></td><td class="small">${headlinesCell(r, 4)}</td></tr>`;
@@ -114,30 +167,31 @@
     $('#scan-meta').textContent = `last scan ${ist(scan.run_at)} · ${scan.status} · ${mode} mode · ${scan.message || ''}` + (st.data_as_of ? ` · data as of ${st.data_as_of}` : '');
     const rg = scan.regime || {};
     const rEl = $('#regime');
-    if (rg.state) {
+    if (rg.state && rg.state !== 'RISK_ON') {
       rEl.className = 'regime ' + rg.state;
-      rEl.innerHTML = `<span class="state">${rg.state.replace('_', ' ')}</span> ${esc(rg.note)} <span class="muted small">nifty ${fmt(rg.nifty_close, 0)} · 50dma ${fmt(rg.sma50, 0)} · 200dma ${fmt(rg.sma200, 0)} · allocation ${Math.round(rg.allocation * 100)}%</span>`;
+      rEl.innerHTML = `<span class="state">${rg.state.replace('_', ' ')}</span> ${esc(rg.note)} <span class="muted small">nifty ${fmt(rg.nifty_close, 0)} · 50dma ${fmt(rg.sma50, 0)} · 200dma ${fmt(rg.sma200, 0)}</span>`;
       rEl.classList.remove('hidden');
     } else rEl.classList.add('hidden');
+    renderSummary(scan);
 
     const all = scan.results || [];
     const quant = all.filter((r) => r.rank > 0).sort((a, b) => a.rank - b.rank);
     $('#picks thead').innerHTML = QUANT_HEAD;
     tb.innerHTML = quant.map((r) => quantRow(r, mode)).join('') ||
-      `<tr><td colspan="16" class="muted">${mode === 'swing' ? 'no valid setups today — normal; pullback-reversal setups appear a handful of days a month. nothing to buy.' : 'no eligible stocks in this scan.'}</td></tr>`;
+      `<tr><td colspan="10" class="muted">${mode === 'swing' ? 'no valid setups today — normal; pullback-reversal setups appear a handful of days a month. nothing to buy.' : 'no eligible stocks in this scan.'}</td></tr>`;
     const reasons = Object.entries(st.excluded_reasons || {}).map(([k, v]) => `${k}: ${v}`).join(' · ');
     const gate = Object.entries(st.gate_reasons || {}).map(([k, v]) => `${k}: ${v}`).join(' · ');
     $('#stats').innerHTML = st.universe ? `universe ${st.universe} · ${mode === 'swing' ? `setups ${st.setups}` : `eligible ${st.eligible}`} · verified ${st.verified ?? 0} · gated out ${st.gated_out ?? 0}${gate ? ` (${esc(gate)})` : ''} · technical exclusions: ${esc(reasons)}` +
       (st.fetch_errors ? ` · ${st.fetch_errors} data errors` : '') +
       (st.missing_symbols?.length ? ` · not in instrument master: ${st.missing_symbols.join(', ')}` : '') : '';
-    $('#mode-note').textContent = mode === 'swing'
-      ? 'swing mode: buy at the next open, place the stop immediately, sell at the target or the stop, otherwise at the close of the "hold until" day. quantity uses your capital, risk-per-trade and the regime allocation. educational tool, not investment advice.'
-      : 'positional mode: review daily, act only when a stop is hit or at the monthly rebalance. quantity uses your capital, risk-per-trade and the regime allocation. educational tool, not investment advice.';
+    $('#mode-note').textContent = (mode === 'swing'
+      ? 'swing mode: buy at the next open, place the stop immediately, sell at the target or the stop, otherwise at the close of the "hold until" day.'
+      : 'positional mode: review daily, act only when a stop is hit or at the monthly rebalance.') + ' click a row for fundamentals, promoters, news and the exit rules. educational tool, not investment advice.';
 
     // cumulative
     const cum = all.filter((r) => r.cum_rank > 0).sort((a, b) => a.cum_rank - b.cum_rank);
     $('#cum-picks thead').innerHTML = CUM_HEAD;
-    $('#cum-picks tbody').innerHTML = cum.map((r) => cumRow(r, mode)).join('') || '<tr><td colspan="17" class="muted">nothing passed the cumulative filter in this scan.</td></tr>';
+    $('#cum-picks tbody').innerHTML = cum.map((r) => cumRow(r, mode)).join('') || '<tr><td colspan="10" class="muted">nothing passed the cumulative filter in this scan.</td></tr>';
     $('#cum-warn').classList.toggle('hidden', !!st.sentiment_enabled);
     const w = st.weights || {};
     $('#cum-meta').textContent = `weights quant ${w.quant ?? 55} / sentiment ${w.sentiment ?? 30} / quality ${w.quality ?? 15} · ${st.sentiment_scored ?? 0} of ${all.length} candidates have news sentiment · ${st.sentiment_excluded ?? 0} vetoed by negative news` + (st.sentiment_error ? ` · marketaux: ${st.sentiment_error}` : '');
