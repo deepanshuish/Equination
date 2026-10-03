@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Equination</title>
-<link rel="stylesheet" href="/static/styles.css?v=5">
+<link rel="stylesheet" href="/static/styles.css?v=6">
 </head>
 <body>
 <header class="top">
@@ -13,6 +13,7 @@
     <button data-tab="quant" class="active">quant</button>
     <button data-tab="cumulative">cumulative</button>
     <button data-tab="sentiment">sentiment</button>
+    <button data-tab="performance">performance</button>
     <button data-tab="backtest">backtest</button>
     <button data-tab="history">history</button>
     <button data-tab="settings">settings</button>
@@ -92,6 +93,18 @@
     <h3>shortlist sentiment (from the last scan)</h3>
     <div class="table-wrap"><table id="sent-table"><thead><tr><th>#</th><th>symbol</th><th>verdict</th><th class="num">score</th><th class="num">articles</th><th class="num">+ / −</th><th>latest headlines</th></tr></thead><tbody></tbody></table></div>
     <p class="muted small">verdict: positive ≥ +0.15 · negative ≤ −0.15 · otherwise neutral · no_news = nothing found in the window. sentiment alone is a weak signal on a 4-day horizon; it is most useful as a veto (avoid names with a cluster of bad news) and as a tie-breaker between similar quant setups.</p>
+  </section>
+
+  <!-- ========================================================== performance -->
+  <section id="tab-performance" class="tab">
+    <div class="row space">
+      <div>
+        <h1>live track record — what the picks actually did</h1>
+        <div class="muted small">every pick from every past scan, graded on the real candles that came after it: buy at the next open, exit at stop / target / last holding day (swing) or stop / latest close (positional), 0.15% cost. this is a forward test, not a backtest.</div>
+      </div>
+      <button id="btn-perf" class="primary">▶ refresh</button>
+    </div>
+    <div id="perf-out" class="muted">loading…</div>
   </section>
 
   <!-- ============================================================= backtest -->
@@ -269,6 +282,6 @@
     </div>
   </section>
 </main>
-<script src="/static/app.js?v=5"></script>
+<script src="/static/app.js?v=6"></script>
 </body>
 </html>

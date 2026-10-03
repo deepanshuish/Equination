@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, fundamentals as fnd, scheduler, sentiment as snt, swing
+from . import db, fundamentals as fnd, performance, scheduler, sentiment as snt, swing
 from .backtest import run_backtest
 from .config import NIFTY_KEY, PASSWORD, STATIC_DIR
 from .scanner import refresh_instruments, start_scan_async, start_sweep_async, state
@@ -183,6 +183,11 @@ def sweep_latest(top: int = 5):
         return {"status": "none"}
     return {**{k: v for k, v in res.items() if k != "all"}, "top": res["all"][:top],
             "bottom": res["all"][-top:][::-1] if len(res["all"]) > top else []}
+
+
+@app.get("/api/performance")
+def performance_report():
+    return performance.grade_all()
 
 
 @app.post("/api/token/clear")

@@ -26,6 +26,7 @@
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === 'tab-' + name));
     if (name === 'history') loadHistory();
     if (name === 'settings') loadSettings();
+    if (name === 'performance') loadPerformance();
   }
   document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
   document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) { e.preventDefault(); showTab(g.dataset.goto); } });
@@ -215,6 +216,45 @@
       tick();
     } catch (e) { toast(e.message, true); }
   });
+
+  // ------------------------------------------------------------ performance
+  function statBlock(title, s) {
+    if (!s || !s.trades) return `<div class="metric"><div class="k">${title}</div><div class="v dim">-</div><div class="b">no closed trades</div></div>`;
+    return `<div class="metric"><div class="k">${title}</div><div class="v ${s.avg_ret_pct >= 0 ? 'pos' : 'neg'}">${s.avg_ret_pct >= 0 ? '+' : ''}${fmt(s.avg_ret_pct, 2)}%</div><div class="b">${s.trades} trades · win ${s.win_rate_pct}% · pf ${s.profit_factor ?? '-'} · avg win ${fmt(s.avg_win_pct, 2)}% / loss ${fmt(s.avg_loss_pct, 2)}%${s.nifty_avg_pct != null ? ` · nifty same window ${fmt(s.nifty_avg_pct, 2)}%` : ''}</div></div>`;
+  }
+  function equityChart(curve) {
+    if (curve.length < 2) return '';
+    const W = 900, H = 200, L = 50, R = 10, T = 12, B = 28;
+    const ys = curve.map((c) => c.equity); const y0 = Math.min(...ys, 1) * 0.98, y1 = Math.max(...ys, 1) * 1.02;
+    const x = (i) => L + (i / (curve.length - 1)) * (W - L - R);
+    const y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+    return `<svg class="chart" style="height:200px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <line x1="${L}" x2="${W - R}" y1="${y(1)}" y2="${y(1)}" stroke="#1f4a2e" stroke-dasharray="4 4"/>
+      <path d="${curve.map((c, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(c.equity).toFixed(1)}`).join(' ')}" fill="none" stroke="#39ff14" stroke-width="2"/>
+      <text x="${L - 6}" y="${y(1) + 4}" fill="#5f8a6d" font-size="11" text-anchor="end">1.00x</text>
+      <text x="${L - 6}" y="${y(y1) + 10}" fill="#5f8a6d" font-size="11" text-anchor="end">${y1.toFixed(2)}x</text>
+      <text x="${L}" y="${H - 8}" fill="#5f8a6d" font-size="11">${curve[0].date}</text>
+      <text x="${W - R}" y="${H - 8}" fill="#5f8a6d" font-size="11" text-anchor="end">${curve[curve.length - 1].date}</text></svg>`;
+  }
+  async function loadPerformance() {
+    const out = $('#perf-out'); out.textContent = 'grading…';
+    try {
+      const r = await api('/api/performance');
+      if (!r.outcomes.length) { out.textContent = 'no picks yet. outcomes appear here the day after a scan, once the next candles are downloaded.'; return; }
+      const s = r.stats;
+      const exits = s.exits ? Object.entries(s.exits).map(([k, v]) => `${k} ${v}`).join(' · ') : '';
+      out.innerHTML = `<div class="metrics">${statBlock('all closed picks', s)}${statBlock('quant list', r.by_list.quant)}${statBlock('cumulative list', r.by_list.cumulative)}
+        <div class="metric"><div class="k">status</div><div class="v">${s.trades || 0}<span class="dim small"> closed</span></div><div class="b">${s.open || 0} open · ${s.pending || 0} awaiting next candle · exits: ${exits}</div></div></div>
+        ${equityChart(r.curve)}
+        <h3>by news verdict at signal time</h3>
+        <div class="metrics">${Object.entries(r.by_sentiment || {}).map(([k, v]) => statBlock(k.replace('_', ' '), v)).join('')}</div>
+        <h3>every pick</h3>
+        <div class="table-wrap"><table><thead><tr><th>signal</th><th>symbol</th><th>list</th><th>mode</th><th class="num">entry</th><th class="num">stop</th><th class="num">target</th><th class="num">exit</th><th>reason</th><th class="num">days</th><th class="num">return</th><th class="num">nifty</th><th>news</th></tr></thead><tbody>
+        ${r.outcomes.map((o) => `<tr><td>${o.scan_date}</td><td class="sym">${esc(o.symbol)}</td><td class="small">${o.list}${o.quant_rank ? ` q#${o.quant_rank}` : ''}${o.cum_rank ? ` c#${o.cum_rank}` : ''}</td><td class="small">${o.mode}</td><td class="num">${fmt(o.entry, 2)}</td><td class="num neg">${fmt(o.stop, 2)}</td><td class="num pos">${fmt(o.target, 2)}</td><td class="num">${fmt(o.exit, 2)}</td><td><span class="badge ${o.exit_reason === 'target' ? 'positive' : o.exit_reason === 'stop' ? 'negative' : o.status === 'open' ? 'neutral' : 'no_news'}">${o.status === 'pending' ? 'pending' : o.exit_reason}</span></td><td class="num">${o.days_held}</td><td class="num">${o.ret_pct == null ? '-' : pct(o.ret_pct)}</td><td class="num">${o.nifty_ret_pct == null ? '-' : pct(o.nifty_ret_pct)}</td><td class="small">${o.sentiment_verdict.replace('_', ' ')}</td></tr>`).join('')}</tbody></table></div>
+        <p class="muted small">a stock that stays in the list on consecutive days is graded once per signal day. "open" = still inside its holding window or above its stop; "pending" = no candle after the signal yet. judge after 30+ closed trades, not 4.</p>`;
+    } catch (e) { out.textContent = e.message; }
+  }
+  $('#btn-perf').addEventListener('click', loadPerformance);
 
   // -------------------------------------------------------------- backtest
   function metric(k, v, b) { return `<div class="metric"><div class="k">${k}</div><div class="v">${v}</div><div class="b">${b || ''}</div></div>`; }
