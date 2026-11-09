@@ -119,7 +119,9 @@ def ensure_local_user() -> int:
     ids = db.list_user_ids()
     if ids:
         return min(ids)
-    uid = db.create_user(LOCAL_EMAIL, hash_password(secrets.token_urlsafe(32)))
+    # "!" never verifies (verify_password needs three $-separated parts), and
+    # avoids hashlib.scrypt, which macOS's built-in Python 3.9 lacks.
+    uid = db.create_user(LOCAL_EMAIL, "!")
     db.adopt_legacy_data(uid)
     if not db.get_settings(uid).get("api_key"):
         db.set_settings(uid, {"redirect_uri": f"{PUBLIC_URL}/callback"})
