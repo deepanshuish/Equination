@@ -19,8 +19,12 @@ and grades its own past picks. It never places orders.
 - **Positional mode**: monthly momentum rotation with a Nifty 200-DMA regime filter.
 - **Gates**: ROE, P/E, D/E, margins (Upstox key ratios); promoters cutting
   stake or pledging (Upstox shareholding); user exclude list.
-- **Three views**: *Quant* (numbers only), *Sentiment* (news only, plus a
-  market-wide sweep of most positive / negative names), *Cumulative* (weighted blend).
+- **Overview**: every stock in the universe rated *Buy* (setup fired today, buy
+  at the next open), *Wait* (uptrend, setup not complete: a buy-stop above
+  today's high or a limit order on a dip) or *Avoid*, each with a buy price,
+  when to buy, stop-loss, target and news sentiment.
+- **Sentiment**: news sentiment for every stock, ranked, with the same stop and
+  target. On Marketaux's free plan coverage builds up over a few daily scans.
 - **Backtest** of the rules on the user's downloaded history, and a
   **Performance** tab that forward-grades every pick ever made.
 - **Accounts**: email + password (scrypt), server-side sessions, per-user

@@ -4,20 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Equination</title>
-<link rel="stylesheet" href="/static/styles.css?v=8">
+<link rel="stylesheet" href="/static/styles.css?v=9">
 </head>
 <body class="app">
 <header class="top">
   <a class="logo" href="/app">Equi<span>nation</span></a>
   <nav>
-    <button data-tab="quant" class="active">Quant</button>
-    <button data-tab="cumulative">Cumulative</button>
+    <button data-tab="overview" class="active">Overview</button>
     <button data-tab="sentiment">Sentiment</button>
     <button data-tab="performance">Performance</button>
     <button data-tab="backtest">Backtest</button>
     <button data-tab="history">History</button>
     <button data-tab="settings">Settings</button>
-    <button data-tab="strategy">Strategy</button>
   </nav>
   <div class="sys" id="sys"></div>
   <div class="user" id="user"></div>
@@ -26,11 +24,11 @@
 <main>
   <div id="toast" class="toast hidden"></div>
 
-  <!-- ================================================================ quant -->
-  <section id="tab-quant" class="tab active">
+  <!-- ============================================================= overview -->
+  <section id="tab-overview" class="tab active">
     <div class="row space">
       <div>
-        <h1>Quant picks — numbers only</h1>
+        <h1>Overview — every stock, and what to do next</h1>
         <div id="scan-meta" class="muted small">no scan yet.</div>
       </div>
       <div class="actions"><button id="btn-scan" class="primary">Run scan</button></div>
@@ -43,58 +41,38 @@
       Upstox access token missing or expired (tokens die at 03:30 IST daily).
       <a href="#" data-goto="settings">open settings</a>, log in, run the scan again.
     </div>
-    <div class="table-wrap"><table id="picks" class="picks"><thead></thead><tbody></tbody></table></div>
-    <div id="stats" class="stat-line"></div>
-    <p id="mode-note" class="muted small"></p>
-  </section>
-
-  <!-- =========================================================== cumulative -->
-  <section id="tab-cumulative" class="tab">
-    <div class="row space">
-      <div>
-        <h1>Cumulative picks — numbers, news and quality</h1>
-        <div id="cum-meta" class="muted small"></div>
-      </div>
+    <div class="toolbar">
+      <div class="filters" id="ov-filters"></div>
+      <input id="ov-search" class="search" placeholder="Search stock…" autocomplete="off">
     </div>
-    <div id="cum-warn" class="callout warn hidden">No Marketaux key configured — cumulative ranking is running on quant + fundamentals only. Add the key in <a href="#" data-goto="settings">settings</a>.</div>
-    <div class="table-wrap"><table id="cum-picks"><thead></thead><tbody></tbody></table></div>
-    <p class="muted small">cum score = w<sub>q</sub>·quant percentile + w<sub>s</sub>·sentiment (0-100, confidence-weighted by article count) + w<sub>f</sub>·fundamentals quality. Stocks with strongly negative news (≤ -0.35 across ≥ 2 articles) are dropped. Same entry/stop/target as the quant list.</p>
+    <div class="table-wrap"><table id="overview" class="overview">
+      <thead><tr><th>#</th><th>stock</th><th>action</th><th class="num">buy at</th><th>when</th><th class="num">stop-loss</th><th class="num">target</th><th>sentiment</th><th class="num">qty</th></tr></thead>
+      <tbody></tbody></table></div>
+    <div id="stats" class="stat-line"></div>
+    <p class="muted small"><b>Buy</b>: the full setup fired today — buy at the next open, place the stop straight away, sell at the target or the stop, otherwise at the close of the "hold until" day.
+      <b>Wait</b>: healthy uptrend, setup not complete — use the price shown (a buy-stop above it, or a limit order on a dip) and the same stop and target once filled.
+      <b>Avoid</b>: not a buy now; the stop-loss is where to exit if you already hold it. Click any row for fundamentals, promoters and news. Educational tool, not investment advice.</p>
   </section>
 
   <!-- ============================================================ sentiment -->
   <section id="tab-sentiment" class="tab">
     <div class="row space">
       <div>
-        <h1>News sentiment — if you only read the headlines</h1>
-        <div class="muted small">every stock that passed the technical + fundamentals gate in the last scan, ranked by Marketaux sentiment alone. score is a recency-weighted mean of per-article entity sentiment in [-1, 1].</div>
+        <h1>Sentiment — news on every stock</h1>
+        <div id="sent-meta" class="muted small">score is a recency-weighted average of Marketaux article sentiment, from −1 (very negative) to +1 (very positive).</div>
       </div>
-      <div class="row"><input id="sent-symbol" placeholder="Symbol, e.g. INFY" style="width:220px;margin:0"><button id="btn-sent-lookup">Look up</button></div>
+      <div class="row"><input id="sent-symbol" placeholder="Symbol, e.g. INFY" style="width:220px;margin:0"><button id="btn-sent-lookup">Refresh one</button></div>
     </div>
     <div id="sent-lookup-out"></div>
-
-    <div class="card" style="margin-bottom:14px">
-      <div class="row space" style="margin-bottom:6px">
-        <div>
-          <h2>Market sweep — top 5 by average sentiment</h2>
-          <div id="sweep-meta" class="muted small">no sweep yet. scans the whole universe (not just the shortlist) and ranks by average news sentiment; needs ≥ 2 scored articles to qualify.</div>
-        </div>
-        <button id="btn-sweep" class="primary">Sweep universe</button>
-      </div>
-      <div class="grid2">
-        <div>
-          <h3>Most positive</h3>
-          <div class="table-wrap"><table><thead><tr><th>#</th><th>symbol</th><th>verdict</th><th class="num">avg</th><th class="num">articles</th></tr></thead><tbody id="sweep-top"></tbody></table></div>
-        </div>
-        <div>
-          <h3>Most negative (avoid)</h3>
-          <div class="table-wrap"><table><thead><tr><th>#</th><th>symbol</th><th>verdict</th><th class="num">avg</th><th class="num">articles</th></tr></thead><tbody id="sweep-bottom"></tbody></table></div>
-        </div>
-      </div>
+    <div id="sent-warn" class="callout warn hidden">No Marketaux key yet — add it in <a href="#" data-goto="settings">settings</a> to get news sentiment.</div>
+    <div class="toolbar">
+      <div class="filters" id="sent-filters"></div>
+      <input id="sent-search" class="search" placeholder="Search stock…" autocomplete="off">
     </div>
-
-    <h3>Shortlist sentiment (from the last scan)</h3>
-    <div class="table-wrap"><table id="sent-table"><thead><tr><th>#</th><th>symbol</th><th>verdict</th><th class="num">score</th><th class="num">articles</th><th class="num">+ / −</th><th>latest headlines</th></tr></thead><tbody></tbody></table></div>
-    <p class="muted small">verdict: positive ≥ +0.15 · negative ≤ −0.15 · otherwise neutral · no_news = nothing found in the window. sentiment alone is a weak signal on a 4-day horizon; it is most useful as a veto (avoid names with a cluster of bad news) and as a tie-breaker between similar quant setups.</p>
+    <div class="table-wrap"><table id="sent-table">
+      <thead><tr><th>#</th><th>stock</th><th>sentiment</th><th class="num">articles</th><th class="num">+ / −</th><th>action</th><th class="num">stop-loss</th><th class="num">target</th><th>latest headlines</th></tr></thead>
+      <tbody></tbody></table></div>
+    <p class="muted small">positive ≥ +0.15 · negative ≤ −0.15 · otherwise neutral · no news = nothing found in the window · not checked = not fetched yet (Marketaux's free plan allows about 100 requests a day; each scan fetches buy and wait stocks first and caches results for 12 hours). A cluster of strongly negative news moves a stock to avoid.</p>
   </section>
 
   <!-- ========================================================== performance -->
@@ -157,29 +135,15 @@
 
       <div class="card">
         <h2>Marketaux (news sentiment)</h2>
-        <p class="muted small">Get a token at <code>marketaux.com</code>. The free tier allows 100 requests/day; Equination queries only the shortlist and caches results for 12 hours.</p>
+        <p class="muted small">Get a token at <code>marketaux.com</code>. The free tier allows 100 requests/day; each scan checks buy and wait stocks first and caches results for 12 hours, so coverage of all stocks builds up over a few days.</p>
         <label>API token <input id="s-marketaux_key" type="password" autocomplete="off" placeholder="(unchanged)"></label>
         <label>News window (days) <input id="s-sentiment_days" type="number" min="1" max="30" step="1"></label>
-        <h3>Cumulative weights (%)</h3>
-        <div class="weights">
-          <label>Quant <input id="s-w_quant" type="number" min="0" max="100"></label>
-          <label>Sentiment <input id="s-w_sentiment" type="number" min="0" max="100"></label>
-          <label>Quality <input id="s-w_quality" type="number" min="0" max="100"></label>
-        </div>
-        <h3>Market sweep</h3>
-        <label>Max fresh requests per sweep <input id="s-sweep_budget" type="number" min="5" max="500" step="5"></label>
-        <label class="inline"><input id="s-sweep_in_scan" type="checkbox"> Run the sweep at the end of every scan</label>
+        <label>Max stocks to fetch fresh news for, per scan <input id="s-sweep_budget" type="number" min="0" max="500" step="5"></label>
         <div class="row"><button id="btn-save-news">Save</button><button id="btn-clear-news" class="ghost">Remove key</button><span id="news-state" class="muted small"></span></div>
       </div>
 
       <div class="card">
-        <h2>Strategy &amp; schedule</h2>
-        <label>Mode
-          <select id="s-mode">
-            <option value="swing">4-day swing: quality pullback + reversal candle</option>
-            <option value="positional">Positional: monthly momentum rotation</option>
-          </select>
-        </label>
+        <h2>Trading &amp; schedule</h2>
         <label>Holding period for swing trades (trading days) <input id="s-hold_days" type="number" min="1" max="15" step="1"></label>
         <label class="inline"><input id="s-require_fundamentals" type="checkbox"> Exclude stocks where Upstox has no fundamentals data</label>
         <label>Never suggest these symbols (comma separated) <input id="s-exclude_symbols" placeholder="e.g. PAYTM, YESBANK"></label>
@@ -191,7 +155,7 @@
         </label>
         <label>Capital (₹) <input id="s-capital" type="number" min="1000" step="1000"></label>
         <label>Risk per trade (% of capital) <input id="s-risk_per_trade_pct" type="number" min="0.1" max="5" step="0.1"></label>
-        <label>Number of picks <input id="s-top_n" type="number" min="3" max="30" step="1"></label>
+        <label>Max positions at once (sets position size) <input id="s-top_n" type="number" min="1" max="30" step="1"></label>
         <label>Minimum price (₹) <input id="s-min_price" type="number" min="1" step="1"></label>
         <label>Minimum 20-day average turnover (₹ crore) <input id="s-min_turnover_cr" type="number" min="0" step="0.5"></label>
         <label>Daily scan time (IST, Mon–Fri) <input id="s-schedule_time" placeholder="18:30"></label>
@@ -202,88 +166,7 @@
     <div id="data-state" class="stat-line"></div>
   </section>
 
-  <!-- ============================================================= strategy -->
-  <section id="tab-strategy" class="tab">
-    <h1>How the picks are chosen</h1>
-    <div class="card prose">
-      <h2>Three views of the same scan</h2>
-      <ul>
-        <li><strong>quant</strong> — purely numerical: price/volume setup, ranked by the technical score, gated on Upstox key ratios and shareholding numbers. No text is read.</li>
-        <li><strong>sentiment</strong> — purely qualitative: Marketaux news for each shortlisted stock, scored by article entity sentiment with a 3-day half-life. This is the "if I only read the news" view.</li>
-        <li><strong>cumulative</strong> — the blend: default 55% quant percentile, 30% sentiment (confidence grows with article count), 15% fundamentals quality score. Clusters of bad news veto a stock. Weights are editable in settings.</li>
-      </ul>
-
-      <h2>Mode 1 — 4-day swing: quality pullback + reversal candle</h2>
-      <p>Finds fundamentally sound stocks in an uptrend that have just pulled back for a few days and printed a bullish
-        reversal candle. Historically this is the short-horizon setup with the best documented odds; the Backtest tab
-        measures those odds on your own data. Every pick comes with an entry, stop, target and a "hold until" date.</p>
-      <h3>1. quality gate (upstox key ratios)</h3>
-      <ul>
-        <li>Return on equity ≥ 10%, positive earnings (P/E &gt; 0 and &lt; 80), positive net margin.</li>
-        <li>Debt/equity ≤ 1.5 (skipped for banks, NBFCs and insurers, where leverage is the business).</li>
-        <li>Missing data is flagged as "unverified"; tick the setting to exclude such stocks entirely.</li>
-      </ul>
-      <h3>2. promoter gate (upstox shareholding pattern)</h3>
-      <ul>
-        <li><strong>Excluded</strong>: promoters cut their stake by ≥ 1.5 percentage points over the last two quarters,
-          or pledged holdings &gt; 15% where reported.</li>
-        <li><strong>Flagged</strong>: promoter holding below 25%; promoters adding is shown as a positive.</li>
-        <li>Your own exclude list in Settings always wins.</li>
-      </ul>
-      <h3>3. technical setup</h3>
-      <ul>
-        <li><strong>Uptrend</strong>: 50 DMA above 200 DMA, price above 200 DMA and within 5% of or above the 50 DMA, positive 6-month return.</li>
-        <li><strong>Pullback</strong>: 3–12% below the 20-day high and RSI(2) dipped under 25 within the last 3 sessions.</li>
-        <li><strong>Trigger candle today</strong>: morning star, bullish engulfing, piercing line, hammer, bullish harami,
-          or a strong close (green, top quarter of range, above yesterday's high, volume ≥ 1.2× average).</li>
-        <li><strong>Sanity</strong>: ATR between 1% and 5% of price, liquid, not up more than 25% in the last month.</li>
-        <li><strong>Regime</strong>: Nifty 50 above its 200-day average, otherwise quantities go to zero.</li>
-      </ul>
-      <h3>4. ranking and trade plan</h3>
-      <p>Score = 35% trend quality (6-month return ÷ volatility) + 20% pullback depth + 30% candle strength + 15% volume.
-        Stop = just under the pattern's low (max 2.5 ATR). Target = the 10-day high, or 2× the risk if that is closer.
-        Exit at the stop, the target, or the close of the last holding day, whichever comes first.</p>
-      <h3>What to expect</h3>
-      <p>Short-horizon setups are a numbers game: a good result is a 58–65% win rate with winners a bit larger than
-        losers, which compounds to the 1–3% a month you are targeting only if you take the trades consistently and
-        respect the stops. No fundamental, promoter or sentiment check can see the next quarterly result or a surprise
-        announcement — the stop is what protects you from those.</p>
-
-      <h2 style="margin-top:28px">Mode 2 — positional: trend-filtered, volatility-adjusted momentum rotation</h2>
-      <p>Positional equity strategy aiming for a realistic <strong>1-3% per month on average</strong>, with some
-        losing months. It never trades intraday and no orders are placed by this app.</p>
-      <h3>1. market regime (nifty 50)</h3>
-      <ul>
-        <li><strong>RISK ON</strong>: Nifty above its 50 and 200-day averages: full allocation.</li>
-        <li><strong>CAUTION</strong>: above 200-day, below 50-day: half allocation.</li>
-        <li><strong>RISK OFF</strong>: below 200-day: no new buys. Momentum's worst losses happen in bear markets.</li>
-      </ul>
-      <h3>2. eligibility filters</h3>
-      <ul>
-        <li>At least 260 daily bars, price above the minimum, 20-day average turnover above the minimum.</li>
-        <li>Stock above its own 50 and 200-day averages and within 25% of its 52-week high.</li>
-        <li>Annualised volatility below 60%; last-month return below 35% (avoids buying blow-off tops).</li>
-      </ul>
-      <h3>3. ranking</h3>
-      <p><code>score = (0.40 × R<sub>12-1</sub> + 0.35 × R<sub>6</sub> + 0.25 × R<sub>3</sub>) / volatility<sub>63d</sub></code>.
-        R<sub>12-1</sub> is the 12-month return skipping the latest month, the classic academic definition that
-        sidesteps short-term mean reversion. Dividing by volatility prefers smooth trends.</p>
-      <h3>4. position sizing and exits</h3>
-      <ul>
-        <li>Stop-loss at 2.5 × ATR(14) below the close. Quantity = min(risk budget ÷ distance to stop, equal-weight slot).</li>
-        <li>Exit when a close is below the stop or the 50-day average, or when the stock drops out of the top 2N at the
-          monthly review. Replace with the highest-ranked name you do not hold.</li>
-        <li>Rebalance monthly; check daily only for stop hits. Expect 2–6 trades a month with 10 positions.</li>
-      </ul>
-      <h3>Why this one</h3>
-      <p>Momentum is the most persistent return anomaly documented across markets, including India, and it stacks well
-        with trend filters. Its weakness, sharp drawdowns during regime changes, is exactly what the Nifty filter and
-        volatility scaling address. The same fundamentals, promoter and sentiment layers are applied to the shortlist
-        before the final ranking. Run the backtest on your own downloaded data before trusting it, and remember that
-        past performance does not guarantee future results.</p>
-    </div>
-  </section>
 </main>
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>

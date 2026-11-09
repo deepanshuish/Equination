@@ -316,7 +316,7 @@ def backtest(user: dict = Depends(auth.require_user)):
     if nifty.empty:
         return {"error": "No Nifty history cached yet - run a scan first."}
     stocks = candles[candles["instrument_key"] != NIFTY_KEY]
-    mode = settings.get("mode", "swing")
+    mode = "swing"  # the overview is built on the swing rules, so the backtest tests those
     if mode == "swing":
         res = swing.backtest(stocks, nifty, swing.SwingParams.from_settings(settings))
     else:

@@ -118,17 +118,32 @@ class SwingFrames:
 
     # ------------------------------------------------------------ trade plan
     def plan(self, symbol: str, i: int | None = None) -> dict:
-        """Entry/stop/target for `symbol` on bar index i (default: last bar)."""
+        """Entry/stop/target for `symbol` on bar index i (default: last bar), entering at the close."""
         i = len(self.c) - 1 if i is None else i
-        close = float(self.c[symbol].iloc[i])
+        return self.plan_at(symbol, float(self.c[symbol].iloc[i]), i)
+
+    def plan_at(self, symbol: str, entry: float, i: int | None = None) -> dict:
+        """Stop/target for buying `symbol` at `entry`: stop under the recent low (max 2.5 ATR),
+        target at the 10-day high or 2x the risk, whichever is further."""
+        i = len(self.c) - 1 if i is None else i
         atr = float(self.atr[symbol].iloc[i])
+        if not np.isfinite(atr) or atr <= 0:
+            atr = 0.02 * entry
         pattern_low = float(self.l[symbol].iloc[max(i - 2, 0): i + 1].min())
-        stop = max(pattern_low - 0.25 * atr, close - self.p.max_stop_atr * atr)
-        risk = max(close - stop, 0.01)
+        if not np.isfinite(pattern_low):
+            pattern_low = entry
+        if entry < pattern_low:
+            # buying a dip below the recent lows: there is no candle low to hide under, so use 1.5 ATR
+            stop = entry - 1.5 * atr
+        else:
+            stop = max(pattern_low - 0.25 * atr, entry - self.p.max_stop_atr * atr)
+        if stop >= entry:
+            stop = entry - atr
+        risk = max(entry - stop, 0.01)
         hi10 = float(self.high10[symbol].iloc[i])
-        target = hi10 if hi10 >= close + risk else close + 2 * risk
-        return {"entry": round(close, 2), "stop": round(stop, 2), "target": round(target, 2),
-                "risk_per_share": round(risk, 2), "reward_risk": round((target - close) / risk, 2)}
+        target = hi10 if np.isfinite(hi10) and hi10 >= entry + risk else entry + 2 * risk
+        return {"entry": round(entry, 2), "stop": round(stop, 2), "target": round(target, 2),
+                "risk_per_share": round(risk, 2), "reward_risk": round((target - entry) / risk, 2)}
 
 
 def regime_on(nifty: pd.Series, index: pd.DatetimeIndex) -> pd.Series:

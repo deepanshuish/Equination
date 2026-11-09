@@ -230,6 +230,90 @@ def fetch_entity_stats(symbols: list[str], api_key: str, days: int = 7) -> dict[
     return out
 
 
+def collect(pairs: list[tuple[str, str]], api_key: str, days: int = 7, budget: int = 40,
+            batch: int = 20, progress=None, priority: set[str] | None = None) -> tuple[dict[str, Sentiment | None], dict]:
+    """Sentiment for every (symbol, name) in `pairs`.
+
+    Fresh cache is used as-is. The rest is fetched in batches through
+    /entity/stats when the plan allows it (about 10 requests for 200 stocks),
+    otherwise one news request per symbol up to `budget` symbols: `priority`
+    symbols first, then never-checked ones, then the stalest, so coverage
+    rotates through the whole list over a few days. Anything still missing
+    falls back to the newest cached result of any age, or None ("not checked").
+    """
+    priority = priority or set()
+    out: dict[str, Sentiment | None] = {}
+    need: list[tuple[str, str]] = []
+    for s, name in pairs:
+        c = get_cached(s)
+        if c is not None:
+            out[s] = c
+        else:
+            need.append((s, name))
+
+    def _age_key(pair: tuple[str, str]) -> tuple[bool, str]:
+        row = db.load_news(pair[0])
+        return (pair[0] not in priority, row["fetched_at"] if row else "")
+    need.sort(key=_age_key)  # stable: keeps the caller's order within each group
+    meta = {"method": "cache", "requests_used": 0, "error": ""}
+    done = len(out)
+    if progress:
+        progress(done, len(pairs))
+    if api_key and need:
+        stats_ok = True
+        try:
+            for i in range(0, len(need), batch):
+                chunk = need[i:i + batch]
+                res = fetch_entity_stats([s for s, _ in chunk], api_key, days)
+                meta["requests_used"] += 1
+                if res is None:
+                    stats_ok = False
+                    break
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                for s, _ in chunk:
+                    r = res.get(s, {"score": None, "n": 0})
+                    n = r["n"] if r["score"] is not None else 0
+                    sent = Sentiment(symbol=s, fetched_at=now, score=r["score"], n_articles=r["n"], n_scored=n,
+                                     verdict=verdict(r["score"], n), query="entity_stats")
+                    db.save_news(s, sent.to_dict(), None)
+                    out[s] = sent
+                done += len(chunk)
+                if progress:
+                    progress(done, len(pairs))
+            if stats_ok:
+                meta["method"] = "entity_stats"
+        except SentimentAuthError:
+            raise
+        except SentimentError as e:
+            meta["error"] = str(e)
+            stats_ok = False
+        if not stats_ok:
+            meta["method"] = "news_per_symbol"
+            fresh = 0
+            for s, name in need:
+                if s in out:
+                    continue
+                if fresh >= budget:
+                    break
+                try:
+                    out[s] = fetch(s, name, api_key, days)
+                    fresh += 1
+                except SentimentAuthError:
+                    raise
+                except SentimentError as e:
+                    meta["error"] = str(e)
+                    if "429" in str(e):
+                        break
+                done += 1
+                if progress:
+                    progress(done, len(pairs))
+            meta["requests_used"] += fresh
+    for s, _ in pairs:
+        if out.get(s) is None:
+            out[s] = get_cached(s, 1e6)
+    return out, meta
+
+
 def sweep(universe: list[tuple[str, str]], api_key: str, days: int = 7, budget: int = 40,
           batch: int = 10, progress=None) -> dict:
     """Ranks a whole universe by average sentiment.
