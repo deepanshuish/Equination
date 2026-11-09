@@ -217,12 +217,13 @@ def fetch(isin: str, token: str, name: str = "") -> Fundamentals:
     return f
 
 
-def get_cached(isin: str) -> Fundamentals | None:
+def get_cached(isin: str, max_age_days: float | None = CACHE_DAYS) -> Fundamentals | None:
+    """Cached fundamentals, or None when missing or older than `max_age_days` (None = any age)."""
     row = db.load_fundamentals(isin)
     if not row:
         return None
     fetched = pd.Timestamp(row["fetched_at"])
-    if fetched < pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=CACHE_DAYS):
+    if max_age_days is not None and fetched < pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=max_age_days):
         return None
     d = json.loads(row["data"])
     return Fundamentals(**{k: d.get(k) for k in Fundamentals.__dataclass_fields__ if k in d})

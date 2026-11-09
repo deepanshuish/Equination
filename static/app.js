@@ -120,7 +120,7 @@
       ['market', `<span class="${rg.state || ''}">${(rg.state || '-').replace('_', ' ')}</span>`, rg.nifty_close ? `nifty ${fmt(rg.nifty_close, 0)}` : ''],
       ['buy now', `<span class="pos">${st.buy ?? 0}</span>`, `${st.wait ?? 0} wait · ${st.avoid ?? 0} avoid`],
       ['stocks rated', `${st.universe || 0}`, `${st.gated_out ?? 0} failed quality checks`],
-      ['news checked', `${st.sentiment_scored ?? 0}`, st.sentiment_enabled ? `${st.sentiment_requests ?? 0} marketaux requests` : 'no marketaux key'],
+      ['news checked', `${st.sentiment_scored ?? 0}`, !st.sentiment_enabled ? 'no marketaux key' : st.stale ? 'from saved news' : `${st.sentiment_requests ?? 0} marketaux requests`],
       ['data as of', st.data_as_of ? fmtDay(st.data_as_of) : '-', `scan ${new Date(scan.run_at).toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' })} ist`],
       ['track record', ps.trades ? `<span class="${ps.avg_ret_pct >= 0 ? 'pos' : 'neg'}">${ps.avg_ret_pct >= 0 ? '+' : ''}${fmt(ps.avg_ret_pct, 2)}%</span>` : '<span class="dim">-</span>', ps.trades ? `${ps.trades} closed · win ${ps.win_rate_pct}%` : 'no closed buys yet'],
       ['next scan', settings.schedule?.enabled && settings.schedule.next_run ? new Date(settings.schedule.next_run).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'off', settings.schedule?.enabled ? 'automatic, ist' : 'enable in settings'],
@@ -164,9 +164,11 @@
   let lastScan = null;
   function renderScan(scan) {
     lastScan = scan;
-    $('#needs-login').classList.toggle('hidden', scan.status !== 'needs_login');
     if (!scan || scan.status === 'none') { $('#scan-meta').textContent = 'no scan yet. connect upstox in settings, then run a scan.'; lastScan = null; renderLists(); return; }
     const st = scan.stats || {};
+    const nl = $('#needs-login');
+    nl.classList.toggle('hidden', !st.stale);
+    if (st.stale) nl.innerHTML = `Showing ratings from prices saved up to <b>${fmtDay(st.data_as_of)}</b> (${esc(st.stale)}). For today's prices, ${st.stale.startsWith('Upstox') ? '<a href="#" data-goto="settings">reconnect Upstox</a> (tokens expire at 03:30 IST daily) and ' : ''}click run scan.`;
     $('#scan-meta').textContent = `last scan ${ist(scan.run_at)} · ${scan.status} · ${scan.message || ''}`;
     const rg = scan.regime || {};
     const rEl = $('#regime');

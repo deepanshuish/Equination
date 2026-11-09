@@ -134,7 +134,7 @@ def gate_fundamentals(keys: list[str], instruments: pd.DataFrame, token: str,
         f = None
         if isin:
             try:
-                f = fnd.get(isin, token, name)
+                f = fnd.get(isin, token, name) if token else fnd.get_cached(isin, max_age_days=None)
             except AuthError:
                 raise
             except Exception as e:  # noqa: BLE001
@@ -173,10 +173,13 @@ def _excluded_set(settings: dict[str, str]) -> set[str]:
 
 # ---------------------------------------------------------------- pipeline
 def run_scan(user_id: int, trigger: str = "manual") -> int:
-    """Full pipeline for one user. Returns the scan id. Never raises."""
+    """Full pipeline for one user. Returns the scan id. Never raises.
+
+    If Upstox rejects the token (they expire at 03:30 IST daily), the stocks
+    are still rated from the prices already downloaded, and the scan says so.
+    """
     state = state_for(user_id)
     settings = db.get_settings(user_id)
-    qp = fnd.QualityParams(require_fundamentals=settings.get("require_fundamentals", "0") == "1")
     params = swing.SwingParams.from_settings(settings)
     scan_id = db.create_scan(user_id, {**params.to_dict(), "mode": "swing", "universe": settings["universe"], "trigger": trigger})
     state.set(running=True, queued=False, phase="starting", done=0, total=0, message="", errors=[], scan_id=scan_id,
@@ -188,46 +191,104 @@ def run_scan(user_id: int, trigger: str = "manual") -> int:
 
         state.set(phase="instruments", message="Refreshing NSE instrument master")
         instruments = refresh_instruments()
-        universe, missing = select_universe(instruments, settings["universe"])
+        universe, missing = _universe(instruments, settings)
         if universe.empty:
             raise UpstoxError("Instrument universe is empty - could not load the NSE instrument master.")
-        excluded = _excluded_set(settings)
-        universe = universe[~universe["symbol"].str.upper().isin(excluded)]
-        names = universe.set_index("instrument_key")
-
         refresh_candles(universe["instrument_key"].tolist(), token, state)
-
-        state.set(phase="scoring", message="Rating every stock")
-        candles = db.load_candles([NIFTY_KEY, *universe["instrument_key"].tolist()])
-        nifty = candles[candles["instrument_key"] == NIFTY_KEY].set_index("date")["close"]
-        regime = market_regime(nifty)
-        stock_candles = candles[candles["instrument_key"] != NIFTY_KEY]
-        if stock_candles.empty:
-            raise UpstoxError("No candle data was downloaded. Check the errors list and your token.")
-
-        rows, stats = _scan_overview(stock_candles, names, token, params, qp, regime, state)
-        stats.update(add_sentiment(rows, settings, state))
-        rows = overview.finalize(rows)
-        counts = {a: sum(1 for r in rows if r["action"] == a) for a in ("buy", "wait", "avoid")}
-        stats.update(counts)
-        stats["mode"] = "swing"
-        stats["quant_picks"] = counts["buy"]
-        stats["missing_symbols"] = missing
-        stats["fetch_errors"] = len(state.errors)
-        stats["data_as_of"] = str(pd.Timestamp(stock_candles["date"].max()).date())
-        msg = (f"{len(rows)} stocks rated: {counts['buy']} buy, {counts['wait']} wait, {counts['avoid']} avoid; "
-               f"{stats['sentiment_scored']} with news sentiment.")
-        db.finish_scan(scan_id, "done", msg, regime.to_dict(), stats, rows)
+        msg = _rate_and_save(user_id, scan_id, settings, state, token, universe, missing)
         state.set(phase="done", message=msg)
     except AuthError as e:
-        db.finish_scan(scan_id, "needs_login", str(e), None, None, [])
-        state.set(phase="needs_login", message=str(e))
+        if has_cached_data(settings):
+            try:
+                universe, missing = _universe(db.get_instruments(), settings)
+                msg = _rate_and_save(user_id, scan_id, settings, state, None, universe, missing,
+                                     stale="Upstox not connected")
+                state.set(phase="needs_login", message=f"Upstox not connected ({e}) - {msg}")
+            except Exception as e2:  # noqa: BLE001
+                log.error("cached rating failed for user %s: %s\n%s", user_id, e2, traceback.format_exc())
+                db.finish_scan(scan_id, "needs_login", str(e), None, None, [])
+                state.set(phase="needs_login", message=str(e))
+        else:
+            db.finish_scan(scan_id, "needs_login", str(e), None, None, [])
+            state.set(phase="needs_login", message=str(e))
     except Exception as e:  # noqa: BLE001
         log.error("scan failed for user %s: %s\n%s", user_id, e, traceback.format_exc())
         db.finish_scan(scan_id, "failed", f"{type(e).__name__}: {e}", None, None, [])
         state.set(phase="failed", message=f"{type(e).__name__}: {e}")
     finally:
         state.set(running=False, queued=False)
+    return scan_id
+
+
+def _universe(instruments: pd.DataFrame, settings: dict[str, str]):
+    universe, missing = select_universe(instruments, settings["universe"])
+    excluded = _excluded_set(settings)
+    if not universe.empty:
+        universe = universe[~universe["symbol"].str.upper().isin(excluded)]
+    return universe, missing
+
+
+def has_cached_data(settings: dict[str, str]) -> bool:
+    """True when instruments and candles from an earlier scan are stored locally."""
+    inst = db.get_instruments()
+    if inst.empty:
+        return False
+    universe, _ = _universe(inst, settings)
+    last = db.last_candle_dates()
+    return NIFTY_KEY in last and any(k in last for k in universe["instrument_key"])
+
+
+def _rate_and_save(user_id: int, scan_id: int, settings: dict[str, str], state: ScanState, token: str | None,
+                   universe: pd.DataFrame, missing: list[str], stale: str = "") -> str:
+    """Rates every stock from the stored candles and saves the scan. With token=None only
+    cached fundamentals and news are used (nothing is fetched)."""
+    qp = fnd.QualityParams(require_fundamentals=settings.get("require_fundamentals", "0") == "1")
+    params = swing.SwingParams.from_settings(settings)
+    names = universe.set_index("instrument_key")
+    state.set(phase="scoring", message="Rating every stock")
+    candles = db.load_candles([NIFTY_KEY, *universe["instrument_key"].tolist()])
+    nifty = candles[candles["instrument_key"] == NIFTY_KEY].set_index("date")["close"]
+    regime = market_regime(nifty)
+    stock_candles = candles[candles["instrument_key"] != NIFTY_KEY]
+    if stock_candles.empty:
+        raise UpstoxError("No candle data was downloaded. Check the errors list and your token.")
+
+    rows, stats = _scan_overview(stock_candles, names, token, params, qp, regime, state)
+    stats.update(add_sentiment(rows, settings if token else {**settings, "marketaux_key": ""}, state))
+    if not token:  # news came from the cache only; the key itself is fine
+        stats.update(sentiment_enabled=bool(settings.get("marketaux_key")), sentiment_method="saved news only")
+    rows = overview.finalize(rows)
+    counts = {a: sum(1 for r in rows if r["action"] == a) for a in ("buy", "wait", "avoid")}
+    stats.update(counts)
+    stats["mode"] = "swing"
+    stats["quant_picks"] = counts["buy"]
+    stats["missing_symbols"] = missing
+    stats["fetch_errors"] = len(state.errors)
+    stats["data_as_of"] = str(pd.Timestamp(stock_candles["date"].max()).date())
+    stats["stale"] = stale
+    msg = (f"{len(rows)} stocks rated: {counts['buy']} buy, {counts['wait']} wait, {counts['avoid']} avoid; "
+           f"{stats['sentiment_scored']} with news sentiment.")
+    if stale:
+        msg = f"Rated from saved prices up to {stats['data_as_of']} ({stale}). " + msg
+    db.finish_scan(scan_id, "done", msg, regime.to_dict(), stats, rows)
+    return msg
+
+
+def rate_from_cache(user_id: int, reason: str) -> int | None:
+    """Re-rates every stock from saved prices without contacting Upstox or Marketaux.
+    Used once for scans made before every stock was rated. Returns the scan id, or None."""
+    settings = db.get_settings(user_id)
+    if not has_cached_data(settings):
+        return None
+    params = swing.SwingParams.from_settings(settings)
+    scan_id = db.create_scan(user_id, {**params.to_dict(), "mode": "swing", "universe": settings["universe"], "trigger": "cached"})
+    universe, missing = _universe(db.get_instruments(), settings)
+    try:
+        _rate_and_save(user_id, scan_id, settings, ScanState(), None, universe, missing, stale=reason)
+    except Exception as e:  # noqa: BLE001
+        log.error("cached rating failed for user %s: %s\n%s", user_id, e, traceback.format_exc())
+        db.finish_scan(scan_id, "failed", f"{type(e).__name__}: {e}", None, None, [])
+        return None
     return scan_id
 
 

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from . import auth, db, fundamentals as fnd, performance, scheduler, sentiment as snt, swing
 from .backtest import run_backtest
 from .config import NIFTY_KEY, PUBLIC_URL, REQUIRE_LOGIN, STATIC_DIR
-from .scanner import refresh_instruments, start_scan_async, start_sweep_async, state_for
+from .scanner import rate_from_cache, refresh_instruments, start_scan_async, start_sweep_async, state_for
 from .strategy import StrategyParams
 from .universe import select_universe
 from .upstox_client import AuthError, UpstoxError, auth_dialog_url, exchange_code, verify_token
@@ -261,6 +261,11 @@ def scan_status(user: dict = Depends(auth.require_user)):
 @app.get("/api/scan/latest")
 def latest_scan(user: dict = Depends(auth.require_user)):
     scan = db.get_scan(user["id"])
+    if (scan is None or "buy" not in (scan.get("stats") or {})) and not state_for(user["id"]).running:
+        # No scan yet, or the last one is from before every stock was rated: rate them now from the
+        # prices already downloaded (no Upstox or Marketaux calls), so the overview isn't empty.
+        if rate_from_cache(user["id"], "re-rated after the app update"):
+            scan = db.get_scan(user["id"])
     return scan or {"results": [], "status": "none"}
 
 
