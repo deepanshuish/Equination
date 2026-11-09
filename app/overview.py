@@ -13,6 +13,11 @@ Each stock gets one of three actions, judged on the latest daily close:
           steeply, failing the fundamentals/promoter checks, or hit by a
           cluster of negative news.
 
+The chart reader (chart.py) adds daily and weekly trend, volume and patterns:
+a volume-confirmed cup & handle or bull flag breakout becomes a buy with the
+pattern's stop and measured-move target; a pattern still forming becomes a
+wait with a buy-stop just above its pivot; a bear flag breakdown is an avoid.
+
 Every row carries an entry, stop-loss and target. For "avoid" rows the levels
 are where a holder would exit, not a buy suggestion.
 """
@@ -21,7 +26,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from . import patterns as pat
+from . import chart, patterns as pat
 from .swing import SwingFrames, SwingParams
 
 PATTERN_LABEL = {"morning_star": "morning star", "bullish_engulfing": "bullish engulfing", "piercing": "piercing line",
@@ -109,6 +114,9 @@ def build(fr: SwingFrames, names: pd.DataFrame, p: SwingParams, regime_ok: bool,
 
         plan = fr.plan_at(key, entry)
         score = _f(fr.score, key)
+        daily = pd.DataFrame({"open": fr.o[key], "high": fr.h[key], "low": fr.l[key], "close": fr.c[key],
+                              "volume": fr.v[key]}).dropna(subset=["close"])
+        ch = chart.analyze(daily)
         rows.append({
             **base, "action": action, "reason": reason, "entry_type": entry_type,
             "close": round(close, 2), "score": round(score, 1) if np.isfinite(score) else 0.0,
@@ -124,13 +132,88 @@ def build(fr: SwingFrames, names: pd.DataFrame, p: SwingParams, regime_ok: bool,
             "ret_1": round(_f(fr.ret_1m, key) * 100, 1), "atr_pct": round(_f(fr.atr_pct, key) * 100, 2),
             "vol_ratio": round(_f(fr.vol_ratio, key), 2), "sma50": round(_f(fr.sma50, key), 2),
             "sma200": round(_f(fr.sma200, key), 2), "turnover_cr": round(_f(fr.turnover_cr, key), 1),
+            "hold_days": p.hold_days, "source": "swing" if action != "avoid" else None,
+            "chart": {k: ch[k] for k in ("daily", "weekly", "volume", "patterns", "outlook", "outlook_score")},
+            "spark": ch["spark"],
         })
+        tradable = (close >= p.min_price and _f(fr.turnover_cr, key) >= p.min_turnover_cr
+                    and _f(fr.atr_pct, key) <= p.max_atr_pct * 1.3 and len(daily) >= 120)
+        apply_chart(rows[-1], ch, tradable, regime_ok, entry_date, high, _f(fr.atr, key))
     return [_clean(r) for r in rows]
 
 
-def _clean(r: dict) -> dict:
-    """NaN/inf are not valid JSON; send them as null."""
-    return {k: (None if isinstance(v, float) and not np.isfinite(v) else v) for k, v in r.items()}
+def _set_plan(r: dict, entry: float, stop: float, target: float) -> None:
+    risk = max(entry - stop, 0.01)
+    r.update(entry=tick(entry), stop_loss=tick(stop), target=tick(target), risk_per_share=round(risk, 2),
+             reward_risk=round((target - entry) / risk, 2), stop_pct=round((stop / entry - 1) * 100, 1),
+             target_pct=round((target / entry - 1) * 100, 1))
+
+
+def _desc(pt: dict) -> str:
+    return f"{pt['label']} on the {pt['tf']} chart"
+
+
+def apply_chart(r: dict, ch: dict, tradable: bool, regime_ok: bool, entry_date: str, today_high: float,
+                atr: float) -> None:
+    """Lets chart patterns upgrade or veto the swing verdict."""
+    pats = ch["patterns"]
+    bear = next((x for x in pats if x["bias"] == "bearish" and x["status"] == "breakdown"), None)
+    if bear and r["action"] != "avoid":
+        vol = f" on {bear['breakout_volume_x']}× average volume" if bear["confirmed"] else ""
+        r.update(action="avoid", entry_type="hold", entry_date=None, hold_until=None, source="chart",
+                 reason=f"{_desc(bear)} broke down{vol} — measured move points to ₹{bear['target']:,.2f}")
+        return
+    if r["action"] == "buy" or not tradable or ch["weekly"]["dir"] == "down":
+        return
+    bulls = [x for x in pats if x["bias"] == "bullish"]
+    close = r["close"]
+    max_stop = 0.12  # never risk more than 12% below the entry on a pattern trade
+
+    bo = next((x for x in bulls if x["status"] == "breakout" and x["confirmed"]), None)
+    if bo and regime_ok:
+        stop = max(bo["stop"], close * (1 - max_stop))
+        if bo["target"] > close and bo["target"] - close >= 1.5 * (close - stop):
+            _set_plan(r, close, stop, bo["target"])
+            exit_ = pd.Timestamp(entry_date) + pd.offsets.BDay(bo["hold_days"] - 1)
+            r.update(action="buy", entry_type="open", entry_date=entry_date, hold_until=str(exit_.date()),
+                     hold_days=bo["hold_days"], source="chart",
+                     reason=f"{_desc(bo)} broke out above ₹{bo['pivot']:,.2f} on {bo['breakout_volume_x']}× average volume")
+            return
+
+    cand = bo or next((x for x in bulls if x["status"] == "breakout"), None) \
+        or next((x for x in bulls if x["status"] == "forming" and x["volume_dry_up"]), None)
+    if not cand:
+        return
+    trigger = max(cand["pivot"], today_high) if cand["status"] == "breakout" else cand["pivot"]
+    entry = tick(trigger * 1.002)
+    stop = max(cand["stop"], entry * (1 - max_stop))
+    if stop >= entry or cand["target"] < entry * 1.03:
+        return
+    _set_plan(r, entry, stop, cand["target"])
+    if cand["status"] == "breakout" and not regime_ok:
+        why = f"{_desc(cand)} broke out, but the market is in a downtrend — buy only above ₹{entry:,.2f}"
+    elif cand["status"] == "breakout":
+        why = (f"{_desc(cand)} broke out on light volume ({cand['breakout_volume_x']}× average) — "
+               f"buy only if it clears ₹{entry:,.2f} with stronger volume")
+    else:
+        why = f"{_desc(cand)} forming, volume drying up — buy on a breakout above ₹{entry:,.2f} on strong volume"
+    r.update(action="wait", entry_type="above", entry_date=entry_date, hold_until=None,
+             hold_days=cand["hold_days"], source="chart", reason=why)
+
+
+def _clean(v):
+    """NaN/inf are not valid JSON; send them as null, at any depth."""
+    if isinstance(v, dict):
+        return {k: _clean(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_clean(x) for x in v]
+    if isinstance(v, (float, np.floating)):
+        return float(v) if np.isfinite(v) else None
+    if isinstance(v, np.integer):
+        return int(v)
+    if isinstance(v, np.bool_):
+        return bool(v)
+    return v
 
 
 def finalize(rows: list[dict]) -> list[dict]:

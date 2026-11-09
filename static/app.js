@@ -63,20 +63,84 @@
   }
   const actBadge = (r) => `<span class="act ${r.action}">${ACT[r.action] || r.action}</span>`;
   const entryText = (r) => (r.entry == null ? '-' : r.entry_type === 'above' ? `above ₹${fmt(r.entry, 2)}` : r.entry_type === 'dip' ? `₹${fmt(r.entry, 2)} (limit)` : `₹${fmt(r.entry, 2)}`);
-  function buyAtCell(r) {
-    if (r.action === 'avoid' || r.entry == null) return '<td class="num dim">—<small class="sub">not a buy</small></td>';
-    const sub = { open: 'at next open', above: 'buy-stop order', dip: 'limit order on a dip' }[r.entry_type] || '';
-    return `<td class="num"><b>${r.entry_type === 'above' ? 'above ' : ''}₹${fmt(r.entry, 2)}</b><small class="sub">${sub}</small></td>`;
-  }
-  function whenCell(r) {
-    if (r.action === 'avoid') return '<td class="dim">—</td>';
-    if (r.action === 'buy') return `<td>${fmtDay(r.entry_date)}, at the open<small class="sub">hold until ${fmtDay(r.hold_until)}</small></td>`;
-    if (r.entry_type === 'dip') return `<td>from ${fmtDay(r.entry_date)}<small class="sub">if it dips to ₹${fmt(r.entry, 2)}</small></td>`;
-    return `<td>from ${fmtDay(r.entry_date)}<small class="sub">once it trades above ₹${fmt(r.entry, 2)}</small></td>`;
+  function buyWhenCell(r) {
+    if (r.action === 'avoid' || r.entry == null) return '<td class="bw dim">—<small class="sub">not a buy now</small></td>';
+    const how = { open: 'at the open', above: 'buy-stop, from', dip: 'limit order, from' }[r.entry_type] || '';
+    const when = r.entry_type === 'open' ? `${how} ${fmtDay(r.entry_date)}` : `${how} ${fmtDay(r.entry_date)}`;
+    const hold = r.action === 'buy' ? `hold until ${fmtDay(r.hold_until)}` : `then hold up to ${r.hold_days || 4} trading days`;
+    return `<td class="bw"><b>${r.entry_type === 'above' ? 'above ' : ''}₹${fmt(r.entry, 2)}</b><small class="sub">${when}</small><small class="sub">${hold}</small></td>`;
   }
   const levelCell = (v, p, cls) => (v == null ? '<td class="num dim">-</td>'
     : `<td class="num lv ${cls}">₹${fmt(v, 2)}<small class="sub">${p >= 0 ? '+' : ''}${fmt(p)}%</small></td>`);
 
+  // ------------------------------------------------- fundamentals + chart cells
+  function fundGrade(r) {
+    if (r.quality_score == null && !(r.quality_flags || []).length && !(r.quality_hard || []).length) return null;
+    if ((r.quality_hard || []).length) return 'weak';
+    const warnings = (r.quality_flags || []).filter((f) => !f.startsWith('promoters adding'));  // that one is good news
+    return (r.quality_score ?? 0) >= 65 && !warnings.length ? 'strong' : 'ok';
+  }
+  const GRADE = { strong: 'Strong', ok: 'OK', weak: 'Weak' };
+  function fundCell(r) {
+    const g = fundGrade(r);
+    if (!g) return '<td class="fund"><span class="dim small">not loaded yet</span></td>';
+    const bits = [];
+    if (r.roe != null) bits.push(`ROE ${fmt(r.roe, 0)}%`);
+    if (r.pe != null) bits.push(`P/E ${fmt(r.pe, 0)}`);
+    if (r.debt_equity != null) bits.push(`D/E ${fmt(r.debt_equity, 1)}`);
+    const prom = r.promoter_pct != null ? `promoter ${fmt(r.promoter_pct, 0)}%${r.promoter_change_pp != null ? ` (${r.promoter_change_pp >= 0 ? '+' : ''}${fmt(r.promoter_change_pp, 1)}pp)` : ''}` : '';
+    const why = (r.quality_hard || []).concat(r.quality_flags || []).join('; ');
+    return `<td class="fund" title="${esc(why)}"><span class="grade ${g}">${GRADE[g]}</span>${r.quality_score != null ? ` <span class="dim small">${fmt(r.quality_score, 0)}/100</span>` : ''}<small>${bits.join(' · ') || 'ratios n/a'}</small>${prom ? `<small>${prom}</small>` : ''}</td>`;
+  }
+  const ARROW = { up: '▲', down: '▼', sideways: '►', unknown: '·' };
+  const trendTag = (t, lab) => `<span class="tr ${t?.dir || 'unknown'}" title="${esc(t?.note || '')}">${lab} ${ARROW[t?.dir || 'unknown']}</span>`;
+  const patStatus = (p) => (p.status === 'forming' ? 'forming' : p.confirmed ? `${p.status} ✓` : `${p.status}, light vol`);
+  const patChip = (p) => `<span class="pchip ${p.bias}" title="${esc(p.note)}">${esc(p.label)} · ${p.tf === 'daily' ? 'D' : 'W'} · ${patStatus(p)}</span>`;
+  function chartCell(r) {
+    const c = r.chart;
+    if (!c) return '<td class="dim">-</td>';
+    const v = c.volume || {};
+    return `<td class="chartc"><span class="outlook ${c.outlook}">${c.outlook}</span>${trendTag(c.daily, 'D')}${trendTag(c.weekly, 'W')}`
+      + `${c.patterns.length ? `<div>${c.patterns.map(patChip).join('')}</div>` : ''}`
+      + `<small>volume: ${v.state || '-'}${v.trend_pct != null ? ` · ${v.trend_pct >= 0 ? '+' : ''}${v.trend_pct}% last 2 wks` : ''}</small></td>`;
+  }
+  function miniChart(r, tf) {
+    const s = r.spark?.[tf === 'weekly' ? 'w' : 'd'];
+    if (!s || s.c.length < 5) return '<div class="dim small">not enough history</div>';
+    const W = 560, H = 190, VH = 34, P = 6, R = 64, n = s.c.length;
+    const pats = (r.chart?.patterns || []).filter((p) => p.tf === tf);
+    const levels = [];
+    if (r.target != null) levels.push(['t', r.target, 'target']);
+    if (r.stop_loss != null) levels.push(['s', r.stop_loss, 'stop']);
+    if (r.action !== 'avoid' && r.entry != null) levels.push(['e', r.entry, 'buy']);
+    pats.forEach((p) => levels.push(['p', p.pivot, 'pivot']));
+    const all = [...s.c, ...levels.map((l) => l[1])].filter((x) => x != null && Number.isFinite(x));
+    const y0 = Math.min(...all) * 0.99, y1 = Math.max(...all) * 1.01;
+    const x = (i) => P + (i / (n - 1)) * (W - P - R);
+    const y = (v) => P + (1 - (v - y0) / (y1 - y0)) * (H - VH - 2 * P);
+    const vmax = Math.max(...s.v, 1), bw = Math.max((W - P - R) / n - 1, 1);
+    const vol = s.v.map((v, i) => `<rect class="vb ${i && s.c[i] >= s.c[i - 1] ? 'up' : 'dn'}" x="${(x(i) - bw / 2).toFixed(1)}" y="${(H - P - (v / vmax) * VH).toFixed(1)}" width="${bw.toFixed(1)}" height="${((v / vmax) * VH).toFixed(1)}"/>`).join('');
+    const zones = pats.map((p) => { const a = x(Math.max(n - 1 - p.start_ago, 0)), b = x(n - 1 - p.end_ago); return `<rect class="zone ${p.bias}" x="${a.toFixed(1)}" y="${P}" width="${Math.max(b - a, 2).toFixed(1)}" height="${H - VH - 2 * P}"/><text x="${(a + 3).toFixed(1)}" y="${P + 11}">${esc(p.label)}</text>`; }).join('');
+    const line = s.c.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    let lastY = -99;
+    const lv = levels.sort((a, b) => b[1] - a[1]).map(([k, v, lab]) => {
+      const yy = y(v); const ty = Math.max(yy + 3, lastY + 11); lastY = ty;
+      return `<line class="lv ${k}" x1="${P}" x2="${W - R}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}"/><text class="${k}" x="${W - R + 4}" y="${ty.toFixed(1)}">${lab} ${fmt(v, 0)}</text>`;
+    }).join('');
+    return `<svg class="mini" viewBox="0 0 ${W} ${H}" role="img" aria-label="${tf} price chart">${zones}${vol}<path class="px" d="${line}"/>${lv}<text x="${P}" y="${H - 2}">${s.from || ''}</text></svg>`;
+  }
+  function chartDetail(r) {
+    const c = r.chart; if (!c) return '';
+    const v = c.volume || {};
+    const pl = c.patterns.length ? `<ul class="plist">${c.patterns.map((p) => `<li>${patChip(p)} ${esc(p.note)} · ${p.bias === 'bullish' ? 'breakout above' : 'breakdown below'} ₹${fmt(p.pivot, 2)} · stop ₹${fmt(p.stop, 2)} · measured target ₹${fmt(p.target, 2)}${p.breakout_volume_x != null ? ` · ${p.breakout_volume_x}× avg volume` : ''}${p.volume_dry_up ? ' · volume dried up inside the pattern' : ''}</li>`).join('')}</ul>` : '<p class="dim">no cup &amp; handle or flag on either chart right now.</p>';
+    return `<div class="charts">
+      <div><h4>daily chart (6 months)</h4>${miniChart(r, 'daily')}<p>${trendTag(c.daily, 'daily')} ${esc(c.daily.note)}</p></div>
+      <div><h4>weekly chart (~1.5 years)</h4>${miniChart(r, 'weekly')}<p>${trendTag(c.weekly, 'weekly')} ${esc(c.weekly.note)}</p></div>
+      <div><h4>outlook &amp; volume</h4><p><span class="outlook ${c.outlook}">${c.outlook}</span> score ${c.outlook_score >= 0 ? '+' : ''}${c.outlook_score} (weekly trend 40%, daily trend 30%, volume and patterns the rest)</p>
+        <p>volume: <b>${v.state || '-'}</b> — ${esc(v.note || '')}${v.ud_ratio != null ? ` · up/down volume ${v.ud_ratio}` : ''}${v.trend_pct != null ? ` · last 2 weeks ${v.trend_pct >= 0 ? '+' : ''}${v.trend_pct}% vs before` : ''}${v.weekly_trend_pct != null ? ` · last 4 weeks ${v.weekly_trend_pct >= 0 ? '+' : ''}${v.weekly_trend_pct}% vs prior 3 months` : ''}${v.today_x != null ? ` · today ${v.today_x}× average` : ''}</p>
+        <h4 style="margin-top:8px">patterns</h4>${pl}</div>
+    </div>`;
+  }
   function detailRow(r, cols) {
     const kv = (pairs) => `<div class="kv">${pairs.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>`;
     const checked = r.quality_score != null || (r.quality_flags || []).length;
@@ -87,19 +151,19 @@
     const prom = checked ? kv([['promoter holding', r.promoter_pct != null ? fmt(r.promoter_pct) + '%' : 'n/a'], ['change (2 qtrs)', r.promoter_change_pp != null ? pct(r.promoter_change_pp) + ' pp' : null], ['pledged', r.pledge_pct != null ? fmt(r.pledge_pct, 0) + '%' : null], ['FII', r.fii_pct != null ? fmt(r.fii_pct) + '%' : null], ['DII', r.dii_pct != null ? fmt(r.dii_pct) + '%' : null]]) : '<span class="dim small">checked for buy and wait stocks only</span>';
     const tech = kv([['close', fmt(r.close, 2)], ['50 dma', fmt(r.sma50, 2)], ['200 dma', fmt(r.sma200, 2)], ['off 20-day high', r.pullback_pct != null ? fmt(r.pullback_pct) + '%' : null], ['RSI(2)', fmt(r.rsi2, 0)], ['6m return', pct(r.ret_6)], ['1m return', pct(r.ret_1)], ['ATR %', fmt(r.atr_pct, 2) + '%'], ['turnover', '₹' + fmt(r.turnover_cr) + ' cr/day'], ['score', fmt(r.score, 0) + '/100']]);
     const plan = kv([[r.action === 'avoid' ? 'last close' : 'buy at', r.action === 'avoid' ? fmt(r.close, 2) : entryText(r)], ['when', r.action === 'buy' ? `${fmtDay(r.entry_date)}, at the open` : r.action === 'wait' ? `from ${fmtDay(r.entry_date)}` : 'not a buy now'], [r.action === 'avoid' ? 'stop-loss (if holding)' : 'stop-loss', fmt(r.stop_loss, 2)], ['target', fmt(r.target, 2)], ['reward : risk', r.reward_risk != null ? fmt(r.reward_risk) : null], ['hold until', r.hold_until ? fmtDay(r.hold_until) : null], ['quantity', r.quantity ? `${r.quantity} (${inr(r.position_value)})` : null], ['risk if stopped', r.quantity ? inr(r.risk_amount) : null]]);
-    return `<tr class="detail"><td colspan="${cols}"><div class="dgrid">
+    return `<tr class="detail"><td colspan="${cols}"><div class="dwrap">${chartDetail(r)}<div class="dgrid">
       <div><h4>trade plan</h4>${plan}<p class="hint">${esc(r.exit_rules || '')}</p></div>
       <div><h4>technicals</h4>${tech}</div>
       <div><h4>fundamentals</h4>${fund}</div>
       <div><h4>promoters &amp; holders</h4>${prom}</div>
       <div><h4>news (${r.sentiment_n || 0} scored of ${r.sentiment_articles || 0})</h4>${sentBadge(r)}${headlinesCell(r, 4)}</div>
-    </div></td></tr>`;
+    </div></div></td></tr>`;
   }
   function overviewRow(r, i) {
     return `<tr class="main r-${r.action}" data-key="${esc(r.instrument_key)}"><td>${i + 1}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td>`
-      + `<td class="why">${actBadge(r)}<small>${esc(r.reason || '')}</small></td>${buyAtCell(r)}${whenCell(r)}`
+      + `${fundCell(r)}${chartCell(r)}<td class="why">${actBadge(r)}<small>${esc(r.reason || '')}</small></td>${buyWhenCell(r)}`
       + `${levelCell(r.stop_loss, r.stop_pct, 'neg')}${levelCell(r.target, r.target_pct, 'pos')}<td>${sentBadge(r)}</td>`
-      + `<td class="num">${r.quantity || '<span class="dim">-</span>'}</td></tr>` + detailRow(r, 9);
+      + `<td class="num">${r.quantity || '<span class="dim">-</span>'}</td></tr>` + detailRow(r, 10);
   }
   function sentRow(r, i) {
     return `<tr class="r-${r.action}"><td>${i + 1}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td>${sentBadge(r)}</td>`
@@ -131,7 +195,15 @@
   }
 
   // ------------------------------------------------------------ filters
-  const view = { ov: 'all', ovQ: '', sent: 'all', sentQ: '' };
+  const view = { ov: 'all', ovQ: '', ovChart: '', ovFund: '', sent: 'all', sentQ: '' };
+  function chartMatch(r, f) {
+    const c = r.chart || { patterns: [] };
+    if (!f) return true;
+    if (f === 'bullish' || f === 'bearish') return c.outlook === f;
+    if (f === 'any_pattern') return c.patterns.length > 0;
+    if (f === 'breakout') return c.patterns.some((p) => p.status !== 'forming');
+    return c.patterns.some((p) => p.kind === f);
+  }
   const matchQ = (r, q) => !q || r.symbol.toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q);
   function filterBar(el, opts, current, key) {
     $(el).innerHTML = opts.map(([v, label, n]) => `<button data-f="${key}" data-v="${v}" class="${v === current ? 'on' : ''}">${label}<small>${n}</small></button>`).join('');
@@ -141,15 +213,18 @@
     view[b.dataset.f] = b.dataset.v; renderLists();
   });
   $('#ov-search').addEventListener('input', (e) => { view.ovQ = e.target.value.trim().toLowerCase(); renderLists(); });
+  $('#ov-chart').addEventListener('change', (e) => { view.ovChart = e.target.value; renderLists(); });
+  $('#ov-fund').addEventListener('change', (e) => { view.ovFund = e.target.value; renderLists(); });
   $('#sent-search').addEventListener('input', (e) => { view.sentQ = e.target.value.trim().toLowerCase(); renderLists(); });
 
   function renderLists() {
     const all = (lastScan && lastScan.results) || [];
     const count = (f) => all.filter(f).length;
     filterBar('#ov-filters', [['all', 'All', all.length], ['buy', 'Buy', count((r) => r.action === 'buy')], ['wait', 'Wait', count((r) => r.action === 'wait')], ['avoid', 'Avoid', count((r) => r.action === 'avoid')]], view.ov, 'ov');
-    const ov = all.filter((r) => (view.ov === 'all' || r.action === view.ov) && matchQ(r, view.ovQ));
+    const ov = all.filter((r) => (view.ov === 'all' || r.action === view.ov) && matchQ(r, view.ovQ)
+      && chartMatch(r, view.ovChart) && (!view.ovFund || fundGrade(r) === view.ovFund));
     $('#overview tbody').innerHTML = ov.map(overviewRow).join('')
-      || `<tr><td colspan="9" class="muted">${all.length ? 'nothing matches this filter.' : 'no scan yet — connect Upstox in settings, then click run scan.'}</td></tr>`;
+      || `<tr><td colspan="10" class="muted">${all.length ? 'nothing matches this filter.' : 'no scan yet — connect Upstox in settings, then click run scan.'}</td></tr>`;
 
     const v = (r) => r.sentiment_verdict || 'not_checked';
     filterBar('#sent-filters', [['all', 'All', all.length], ['positive', 'Positive', count((r) => v(r) === 'positive')], ['neutral', 'Neutral', count((r) => v(r) === 'neutral')], ['negative', 'Negative', count((r) => v(r) === 'negative')], ['no_news', 'No news', count((r) => v(r) === 'no_news')], ['not_checked', 'Not checked', count((r) => v(r) === 'not_checked')]], view.sent, 'sent');

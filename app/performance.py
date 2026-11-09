@@ -117,7 +117,7 @@ def grade_all(user_id: int, limit_scans: int = 200) -> dict:
             b = bars.get(r["instrument_key"])
             stop = r.get("stop_loss")
             target = r.get("target") if mode == "swing" else None
-            sim = _simulate(b, as_of, stop, target, hold, mode) if b is not None else {"status": "pending", "exit_reason": "no_data"}
+            sim = _simulate(b, as_of, stop, target, int(r.get("hold_days") or hold), mode) if b is not None else {"status": "pending", "exit_reason": "no_data"}
             nret = None
             if nifty is not None and sim.get("entry_date") is not None and sim.get("exit_date") is not None:
                 try:

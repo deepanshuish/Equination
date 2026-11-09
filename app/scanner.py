@@ -299,15 +299,17 @@ def _scan_overview(stock_candles, names, token, p: swing.SwingParams, qp, regime
     entry_date, exit_date = _hold_until(as_of, p.hold_days)
     rows = overview.build(fr, names, p, regime.allocation > 0, entry_date, exit_date)
 
+    # fundamentals for every stock (2 Upstox requests each, cached 7 days); the quality gate
+    # itself only changes buy and wait verdicts
+    funds = gate_fundamentals([r["instrument_key"] for r in rows], names.reset_index(), token, qp, state)
     candidates = [r["instrument_key"] for r in rows if r["action"] in ("buy", "wait")]
-    funds = gate_fundamentals(candidates, names.reset_index(), token, qp, state)
     gated_out = 0
     for r in rows:
         f = funds.get(r["instrument_key"])
         if f:
             r.update(_fund_summary(f))
             hard = f["assessment"]["hard"]
-            if hard:
+            if hard and r["action"] in ("buy", "wait"):
                 gated_out += 1
                 r["action"] = "avoid"
                 r["reason"] = "Fails the quality check: " + "; ".join(hard)
@@ -320,10 +322,10 @@ def _scan_overview(stock_candles, names, token, p: swing.SwingParams, qp, regime
             r.update(quantity=0, position_value=0, risk_amount=0)
         if r["action"] == "buy":
             r["exit_rules"] = (f"Sell if price hits the stop (₹{r['stop_loss']:,.2f}) or the target (₹{r['target']:,.2f}); "
-                               f"otherwise sell at the close on {r['hold_until']}.")
+                               f"otherwise sell at the close on {pd.Timestamp(r['hold_until']).strftime('%a %d %b')}.")
         elif r["action"] == "wait":
             r["exit_rules"] = (f"After buying, place the stop at ₹{r['stop_loss']:,.2f}, sell at ₹{r['target']:,.2f}, "
-                               f"or at the close {p.hold_days} trading days after you bought.")
+                               f"or at the close {r.get('hold_days') or p.hold_days} trading days after you bought.")
         else:
             r["exit_rules"] = "Not a buy now. If you already hold it, the stop-loss is where to exit."
     stats = {"universe": len(rows), "verified": len(candidates), "gated_out": gated_out,

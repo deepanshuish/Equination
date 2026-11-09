@@ -23,6 +23,13 @@ and grades its own past picks. It never places orders.
   at the next open), *Wait* (uptrend, setup not complete: a buy-stop above
   today's high or a limit order on a dip) or *Avoid*, each with a buy price,
   when to buy, stop-loss, target and news sentiment.
+- **Fundamentals for every stock**: ROE, P/E, debt, margins, growth and promoter
+  holding, graded Strong / OK / Weak (fetched once a week per stock).
+- **Chart reading** on daily and weekly candles: trend (moving averages, slope,
+  higher highs/lows), volume (accumulation vs distribution), and cup & handle,
+  bull flag and bear flag patterns with pivot, stop and measured-move target.
+  A volume-confirmed breakout becomes a buy, a forming pattern a wait above
+  its pivot, and a bear-flag breakdown an avoid.
 - **Sentiment**: news sentiment for every stock, ranked, with the same stop and
   target. On Marketaux's free plan coverage builds up over a few daily scans.
 - **Backtest** of the rules on the user's downloaded history, and a
