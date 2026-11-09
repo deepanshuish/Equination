@@ -191,7 +191,7 @@
     const settings = await api('/api/settings').catch(() => ({}));
     const cells = [
       ['market', `<span class="${rg.state || ''}">${(rg.state || '-').replace('_', ' ')}</span>`, rg.nifty_close ? `nifty ${fmt(rg.nifty_close, 0)}` : ''],
-      ['buy now', `<span class="pos">${st.buy ?? 0}</span>`, `${st.wait ?? 0} wait · ${st.avoid ?? 0} avoid`],
+      ['buy now', '<span class="pos" id="sum-buy">-</span>', '<span id="sum-buy-sub"></span>'],
       ['stocks rated', `${st.universe || 0}`, `${st.gated_out ?? 0} failed quality checks`],
       ['news checked', `${st.sentiment_scored ?? 0}`, !st.sentiment_enabled ? 'no marketaux key' : st.stale ? 'from saved news' : `${st.sentiment_requests ?? 0} marketaux requests`],
       ['data as of', st.data_as_of ? fmtDay(st.data_as_of) : '-', `scan ${new Date(scan.run_at).toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' })} ist`],
@@ -201,10 +201,15 @@
     const el = $('#summary');
     el.innerHTML = cells.map(([k, v, b]) => `<div class="s"><div class="k">${k}</div><div class="v">${v}</div><div class="b">${b}</div></div>`).join('');
     el.classList.remove('hidden');
+    updateBuyCard();
   }
 
   // ------------------------------------------------------------ filters
-  const view = { ov: 'all', ovQ: '', ovChart: '', ovFund: '', sent: 'all', sentQ: '' };
+  const view = { ov: 'all', ovQ: '', ovChart: '', ovFund: '', ovStop: '3', sent: 'all', sentQ: '' };
+  try { const v = localStorage.getItem('eq_max_stop'); if (v !== null) view.ovStop = v; } catch (e) { /* storage unavailable */ }
+  $('#ov-stop').value = view.ovStop;
+  // Only buy/wait stocks whose stop-loss is within the chosen % of the buy price ("" = no limit).
+  const stopOk = (r) => !view.ovStop || (r.action !== 'avoid' && r.entry != null && r.stop_pct != null && -r.stop_pct <= Number(view.ovStop) + 1e-9);
   function chartMatch(r, f) {
     const c = r.chart || { patterns: [] };
     if (!f) return true;
@@ -222,18 +227,37 @@
     view[b.dataset.f] = b.dataset.v; renderLists();
   });
   $('#ov-search').addEventListener('input', (e) => { view.ovQ = e.target.value.trim().toLowerCase(); renderLists(); });
+  $('#ov-stop').addEventListener('change', (e) => {
+    view.ovStop = e.target.value;
+    try { localStorage.setItem('eq_max_stop', view.ovStop); } catch (err) { /* storage unavailable */ }
+    renderLists();
+  });
   $('#ov-chart').addEventListener('change', (e) => { view.ovChart = e.target.value; renderLists(); });
   $('#ov-fund').addEventListener('change', (e) => { view.ovFund = e.target.value; renderLists(); });
   $('#sent-search').addEventListener('input', (e) => { view.sentQ = e.target.value.trim().toLowerCase(); renderLists(); });
 
+  function updateBuyCard() {
+    const el = $('#sum-buy'); if (!el) return;
+    const rows = ((lastScan && lastScan.results) || []).filter(stopOk);
+    el.textContent = rows.filter((r) => r.action === 'buy').length;
+    $('#sum-buy-sub').textContent = `${rows.filter((r) => r.action === 'wait').length} wait` + (view.ovStop ? ` · stop ≤ ${view.ovStop}%` : ' · any stop');
+  }
   function renderLists() {
+    updateBuyCard();
     const all = (lastScan && lastScan.results) || [];
     const count = (f) => all.filter(f).length;
-    filterBar('#ov-filters', [['all', 'All', all.length], ['buy', 'Buy', count((r) => r.action === 'buy')], ['wait', 'Wait', count((r) => r.action === 'wait')], ['avoid', 'Avoid', count((r) => r.action === 'avoid')]], view.ov, 'ov');
-    const ov = all.filter((r) => (view.ov === 'all' || r.action === view.ov) && matchQ(r, view.ovQ)
+    const pool = all.filter(stopOk);
+    const pc = (f) => pool.filter(f).length;
+    filterBar('#ov-filters', [['all', 'All', pool.length], ['buy', 'Buy', pc((r) => r.action === 'buy')], ['wait', 'Wait', pc((r) => r.action === 'wait')], ['avoid', 'Avoid', pc((r) => r.action === 'avoid')]], view.ov, 'ov');
+    const ov = pool.filter((r) => (view.ov === 'all' || r.action === view.ov) && matchQ(r, view.ovQ)
       && chartMatch(r, view.ovChart) && (!view.ovFund || fundGrade(r) === view.ovFund));
-    $('#overview tbody').innerHTML = ov.map(overviewRow).join('')
-      || `<tr><td colspan="10" class="muted">${all.length ? 'nothing matches this filter.' : 'no scan yet — connect Upstox in settings, then click run scan.'}</td></tr>`;
+    const hidden = all.length - pool.length;
+    const empty = !all.length ? 'no scan yet — connect Upstox in settings, then click run scan.'
+      : !pool.length ? `no buy or wait stock has a stop-loss within ${view.ovStop}% of its buy price in this scan — try a wider limit in the stop-loss menu.`
+      : view.ov === 'avoid' && view.ovStop ? 'avoid stocks have no buy price — choose "Any stop" to see them.'
+      : 'nothing matches this filter.';
+    $('#overview tbody').innerHTML = ov.map(overviewRow).join('') || `<tr><td colspan="10" class="muted">${empty}</td></tr>`;
+    $('#ov-hidden').textContent = view.ovStop && hidden ? `showing ${pool.length} of ${all.length} stocks: those with a stop-loss within ${view.ovStop}% of the buy price. ${hidden} hidden (wider stops, or avoid).` : '';
 
     const v = (r) => r.sentiment_verdict || 'not_checked';
     filterBar('#sent-filters', [['all', 'All', all.length], ['positive', 'Positive', count((r) => v(r) === 'positive')], ['neutral', 'Neutral', count((r) => v(r) === 'neutral')], ['negative', 'Negative', count((r) => v(r) === 'negative')], ['no_news', 'No news', count((r) => v(r) === 'no_news')], ['not_checked', 'Not checked', count((r) => v(r) === 'not_checked')]], view.sent, 'sent');

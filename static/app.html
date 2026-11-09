@@ -44,6 +44,12 @@
     <div class="toolbar">
       <div class="filters" id="ov-filters"></div>
       <div class="row tools">
+        <select id="ov-stop" class="search" title="How far below the buy price the stop-loss may be">
+          <option value="3">Stop-loss ≤ 3%</option>
+          <option value="5">Stop-loss ≤ 5%</option>
+          <option value="8">Stop-loss ≤ 8%</option>
+          <option value="">Any stop (incl. avoid)</option>
+        </select>
         <select id="ov-chart" class="search">
           <option value="">All charts</option>
           <option value="bullish">Bullish outlook</option>
@@ -63,6 +69,7 @@
         <input id="ov-search" class="search" placeholder="Search stock…" autocomplete="off">
       </div>
     </div>
+    <div id="ov-hidden" class="muted small" style="margin:-4px 0 8px"></div>
     <div class="table-wrap"><table id="overview" class="overview">
       <thead><tr><th>#</th><th>stock</th><th>fundamentals</th><th>chart &amp; trend</th><th>action</th><th>buy at · when</th><th class="num">stop-loss</th><th class="num">target</th><th>sentiment</th><th class="num">qty</th></tr></thead>
       <tbody></tbody></table></div>
@@ -188,6 +195,6 @@
   </section>
 
 </main>
-<script src="/static/app.js?v=14"></script>
+<script src="/static/app.js?v=15"></script>
 </body>
 </html>
