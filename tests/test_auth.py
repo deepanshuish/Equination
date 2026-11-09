@@ -6,8 +6,16 @@ os.environ.setdefault("EQUINATION_DATA_DIR", tempfile.mkdtemp())
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, db  # noqa: E402
+import pytest  # noqa: E402
+
+from app import auth, db, main  # noqa: E402
 from app.main import app  # noqa: E402
+
+
+@pytest.fixture
+def login_on(monkeypatch):
+    monkeypatch.setattr(auth, "REQUIRE_LOGIN", True)
+    monkeypatch.setattr(main, "REQUIRE_LOGIN", True)
 
 
 def _client():
@@ -21,7 +29,7 @@ def test_encrypt_roundtrip_and_tamper():
     assert auth.decrypt("legacy-plain") == "legacy-plain"
 
 
-def test_signup_login_isolation():
+def test_signup_login_isolation(login_on):
     with _client() as c:
         # unauthenticated: pages redirect, API refuses
         assert c.get("/app", follow_redirects=False).status_code == 302
@@ -63,3 +71,14 @@ def test_invite_code(monkeypatch):
         assert c.get("/api/auth/config").json()["invite_required"] is True
         assert c.post("/api/auth/signup", data={"email": "c@example.com", "password": "password3"}).status_code == 403
         assert c.post("/api/auth/signup", data={"email": "c@example.com", "password": "password3", "invite": "beta42"}).status_code == 200
+
+
+def test_login_off_uses_local_user(monkeypatch):
+    monkeypatch.setattr(auth, "REQUIRE_LOGIN", False)
+    monkeypatch.setattr(main, "REQUIRE_LOGIN", False)
+    with _client() as c:
+        assert c.get("/", follow_redirects=False).headers["location"] == "/app"
+        assert c.get("/app").status_code == 200
+        me = c.get("/api/me").json()
+        assert me["login_required"] is False and me["id"] == min(db.list_user_ids())
+        assert c.get("/api/settings").status_code == 200

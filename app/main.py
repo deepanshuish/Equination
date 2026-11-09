@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from . import auth, db, fundamentals as fnd, performance, scheduler, sentiment as snt, swing
 from .backtest import run_backtest
-from .config import NIFTY_KEY, PUBLIC_URL, STATIC_DIR
+from .config import NIFTY_KEY, PUBLIC_URL, REQUIRE_LOGIN, STATIC_DIR
 from .scanner import refresh_instruments, start_scan_async, start_sweep_async, state_for
 from .strategy import StrategyParams
 from .universe import select_universe
@@ -37,6 +37,8 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
+    if not REQUIRE_LOGIN:
+        auth.ensure_local_user()  # before the scheduler, so its daily scan is registered
     scheduler.start()
     yield
     scheduler.shutdown()
@@ -147,7 +149,8 @@ def logout(request: Request):
 
 @app.get("/api/me")
 def me(user: dict = Depends(auth.require_user)):
-    return {"id": user["id"], "email": user["email"], "created_at": user["created_at"]}
+    return {"id": user["id"], "email": user["email"], "created_at": user["created_at"],
+            "login_required": REQUIRE_LOGIN}
 
 
 # ---------------------------------------------------------------- settings

@@ -20,8 +20,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, Request
 
 from . import db
-from .config import DATA_DIR, PUBLIC_URL
+from .config import DATA_DIR, PUBLIC_URL, REQUIRE_LOGIN
 
+LOCAL_EMAIL = "local@equination"
 SESSION_COOKIE = "eq_session"
 SESSION_DAYS = 30
 SECRET_SETTINGS = {"api_secret", "access_token", "marketaux_key"}
@@ -112,7 +113,22 @@ def cookie_kwargs() -> dict:
             "max_age": SESSION_DAYS * 86400, "path": "/"}
 
 
+def ensure_local_user() -> int:
+    """The account used when login is off: the first existing account, so any
+    earlier data carries over, or a fresh one with an unusable password."""
+    ids = db.list_user_ids()
+    if ids:
+        return min(ids)
+    uid = db.create_user(LOCAL_EMAIL, hash_password(secrets.token_urlsafe(32)))
+    db.adopt_legacy_data(uid)
+    if not db.get_settings(uid).get("api_key"):
+        db.set_settings(uid, {"redirect_uri": f"{PUBLIC_URL}/callback"})
+    return uid
+
+
 def user_from_request(request: Request) -> dict | None:
+    if not REQUIRE_LOGIN:
+        return db.get_user(ensure_local_user())
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None

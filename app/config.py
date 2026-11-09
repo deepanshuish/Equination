@@ -18,7 +18,14 @@ PORT = int(os.environ.get("EQUINATION_PORT") or os.environ.get("PORT") or "8000"
 # (e.g. https://equination.fly.dev). Falls back to the local host/port.
 PUBLIC_URL = os.environ.get("EQUINATION_PUBLIC_URL", "").rstrip("/") or f"http://{HOST}:{PORT}"
 
-UPSTOX_API_BASE = "https://api.upstox.com"
+# Login is off by default for local use: everyone who opens the app is the
+# single local user. It switches on automatically once EQUINATION_PUBLIC_URL
+# is set (i.e. deployed), and EQUINATION_REQUIRE_LOGIN=1/0 overrides either way.
+REQUIRE_LOGIN = os.environ.get(
+    "EQUINATION_REQUIRE_LOGIN", "1" if os.environ.get("EQUINATION_PUBLIC_URL") else "0"
+) == "1"
+
+UPSTOX_API_BASE ="https://api.upstox.com"
 UPSTOX_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
 NIFTY_KEY = "NSE_INDEX|Nifty 50"
 

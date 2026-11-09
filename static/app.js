@@ -234,7 +234,7 @@
     const s = await api('/api/settings').catch(() => null);
     if (!s) return;
     $('#sys').innerHTML = `<span>Upstox <b class="${s.has_access_token ? 'ok' : 'bad'}">${s.has_access_token ? 'connected' : 'not connected'}</b></span><span>Marketaux <b class="${s.has_marketaux_key ? 'ok' : 'warn'}">${s.has_marketaux_key ? 'connected' : 'off'}</b></span><span>Daily scan <b class="${s.schedule?.enabled ? 'ok' : 'warn'}">${s.schedule?.enabled ? s.schedule_time + ' IST' : 'off'}</b></span>`;
-    if (!$('#user').dataset.loaded) { api('/api/me').then((m) => { $('#user').dataset.loaded = '1'; $('#user').innerHTML = `<span>${esc(m.email)}</span><a href="/logout">Log out</a>`; }).catch(() => {}); }
+    if (!$('#user').dataset.loaded) { api('/api/me').then((m) => { $('#user').dataset.loaded = '1'; $('#user').innerHTML = m.login_required ? `<span>${esc(m.email)}</span><a href="/logout">Log out</a>` : ''; }).catch(() => {}); }
   }
 
   // -------------------------------------------------------------- sentiment lookup
