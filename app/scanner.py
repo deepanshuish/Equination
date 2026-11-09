@@ -22,6 +22,7 @@ from .upstox_client import AuthError, UpstoxError, fetch_daily_candles, fetch_ns
 
 log = logging.getLogger("equination.scanner")
 MAX_CONCURRENT_SCANS = 2
+SCAN_VERSION = 3  # bump when scan results gain fields the UI depends on; older scans are re-rated on load
 _pool = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_SCANS, thread_name_prefix="equination-scan")
 _instruments_lock = threading.Lock()
 
@@ -266,6 +267,7 @@ def _rate_and_save(user_id: int, scan_id: int, settings: dict[str, str], state: 
     stats["fetch_errors"] = len(state.errors)
     stats["data_as_of"] = str(pd.Timestamp(stock_candles["date"].max()).date())
     stats["stale"] = stale
+    stats["version"] = SCAN_VERSION
     msg = (f"{len(rows)} stocks rated: {counts['buy']} buy, {counts['wait']} wait, {counts['avoid']} avoid; "
            f"{stats['sentiment_scored']} with news sentiment.")
     if stale:

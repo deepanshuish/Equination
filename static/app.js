@@ -163,16 +163,25 @@
     return `<tr class="main r-${r.action}" data-key="${esc(r.instrument_key)}"><td>${i + 1}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td>`
       + `${fundCell(r)}${chartCell(r)}<td class="why">${actBadge(r)}<small>${esc(r.reason || '')}</small></td>${buyWhenCell(r)}`
       + `${levelCell(r.stop_loss, r.stop_pct, 'neg')}${levelCell(r.target, r.target_pct, 'pos')}<td>${sentBadge(r)}</td>`
-      + `<td class="num">${r.quantity || '<span class="dim">-</span>'}</td></tr>` + detailRow(r, 10);
+      + `<td class="num">${r.quantity || '<span class="dim">-</span>'}</td></tr>`;  // detail row is built on first open
   }
   function sentRow(r, i) {
     return `<tr class="r-${r.action}"><td>${i + 1}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td>${sentBadge(r)}</td>`
       + `<td class="num">${r.sentiment_n || 0}/${r.sentiment_articles || 0}</td><td class="num"><span class="pos">${r.sentiment_pos || 0}</span> / <span class="neg">${r.sentiment_neg || 0}</span></td>`
       + `<td>${actBadge(r)}</td>${levelCell(r.stop_loss, r.stop_pct, 'neg')}${levelCell(r.target, r.target_pct, 'pos')}<td class="small">${headlinesCell(r, 2)}</td></tr>`;
   }
+  // Detail panels (charts, fundamentals, news) are built only when a row is opened: building
+  // them for all ~200 stocks on every filter change made the table freeze and go blank.
   document.addEventListener('click', (e) => {
     const tr = e.target.closest('tr.main'); if (!tr || e.target.closest('a')) return;
-    tr.classList.toggle('open'); tr.nextElementSibling?.classList.toggle('open');
+    let det = tr.nextElementSibling;
+    if (!det || !det.classList.contains('detail')) {
+      const r = (lastScan?.results || []).find((x) => x.instrument_key === tr.dataset.key);
+      if (!r) return;
+      tr.insertAdjacentHTML('afterend', detailRow(r, tr.children.length));
+      det = tr.nextElementSibling;
+    }
+    tr.classList.toggle('open'); det.classList.toggle('open');
   });
 
   async function renderSummary(scan) {
