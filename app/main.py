@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, db, fundamentals as fnd, performance, scheduler, sentiment as snt, swing
+from . import auth, db, fundamentals as fnd, live, performance, scheduler, sentiment as snt, swing
 from .backtest import run_backtest
 from .config import NIFTY_KEY, PUBLIC_URL, REQUIRE_LOGIN, STATIC_DIR
 from .scanner import SCAN_VERSION, rate_from_cache, refresh_instruments, start_scan_async, start_sweep_async, state_for
@@ -368,6 +368,24 @@ def sentiment_debug(symbol: str, refresh: bool = False, user: dict = Depends(aut
     raw = db.load_news(symbol.upper()) or {}
     return {"symbol": symbol.upper(), "sentiment": s.to_dict(), "points": snt.sentiment_points(s),
             "raw": json.loads(raw["raw"]) if raw.get("raw") else None}
+
+
+@app.get("/api/quotes")
+def quotes(force: bool = False, user: dict = Depends(auth.require_user)):
+    """Live prices for every stock in the latest scan (no scan needed)."""
+    scan = db.get_scan(user["id"])
+    rows = (scan or {}).get("results") or []
+    if not rows:
+        return {"quotes": {}, "count": 0, "market_open": live.market_open(), "error": "no scan yet"}
+    token = db.get_settings(user["id"]).get("access_token", "")
+    if not token:
+        return {"quotes": {}, "count": 0, "market_open": live.market_open(), "error": "needs_login"}
+    try:
+        return live.quotes_for(user["id"], rows, token, force)
+    except AuthError:
+        return {"quotes": {}, "count": 0, "market_open": live.market_open(), "error": "needs_login"}
+    except UpstoxError as e:
+        return {"quotes": {}, "count": 0, "market_open": live.market_open(), "error": str(e)}
 
 
 @app.get("/api/status")

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Equination</title>
-<link rel="stylesheet" href="/static/styles.css?v=11">
+<link rel="stylesheet" href="/static/styles.css?v=13">
 </head>
 <body class="app">
 <header class="top">
@@ -45,7 +45,7 @@
       <div class="filters" id="ov-filters"></div>
       <div class="row tools">
         <select id="ov-stop" class="search" title="How far below the buy price the stop-loss may be">
-          <option value="3">Stop-loss ≤ 3%</option>
+          <option value="3.5">Stop-loss ≤ 3.5%</option>
           <option value="5">Stop-loss ≤ 5%</option>
           <option value="8">Stop-loss ≤ 8%</option>
           <option value="">Any stop (incl. avoid)</option>
@@ -69,14 +69,16 @@
         <input id="ov-search" class="search" placeholder="Search stock…" autocomplete="off">
       </div>
     </div>
-    <div id="ov-hidden" class="muted small" style="margin:-4px 0 8px"></div>
+    <div id="ov-hidden" class="muted small" style="margin:-4px 0 2px"></div>
+    <div id="live-line" class="muted small" style="margin:0 0 8px"></div>
     <div class="table-wrap"><table id="overview" class="overview">
-      <thead><tr><th>#</th><th>stock</th><th>fundamentals</th><th>chart &amp; trend</th><th>action</th><th>buy at · when</th><th class="num">stop-loss</th><th class="num">target</th><th>sentiment</th><th class="num">qty</th></tr></thead>
+      <thead><tr><th>#</th><th>stock</th><th class="num">latest price</th><th>fundamentals</th><th>chart &amp; trend</th><th>action</th><th>buy at · when</th><th class="num">stop-loss</th><th class="num">target</th><th>sentiment</th></tr></thead>
       <tbody></tbody></table></div>
     <div id="stats" class="stat-line"></div>
     <p class="muted small"><b>Buy</b>: the full setup fired today — buy at the next open, place the stop straight away, sell at the target or the stop, otherwise at the close of the "hold until" day.
       <b>Wait</b>: healthy uptrend, setup not complete — use the price shown (a buy-stop above it, or a limit order on a dip) and the same stop and target once filled.
       <b>Avoid</b>: not a buy now; the stop-loss is where to exit if you already hold it.
+      <b>Latest price</b>: live from Upstox, refreshed every minute while the market is open (no scan needed), with where it stands against the plan: buy-stop triggered, stop-loss or target hit.
       <b>Fundamentals</b>: Strong = quality score ≥ 65 with no red flags; Weak = fails the ROE, P/E, debt or promoter checks.
       <b>Chart</b>: D / W = daily / weekly trend (▲ up, ▼ down, ► sideways); patterns are cup &amp; handle, bull flag and bear flag, with ✓ when the breakout came on at least 1.4× (weekly 1.3×) average volume.
       Click any row for the price chart, fundamentals, promoters and news. Patterns describe the chart; they do not guarantee the move. Educational tool, not investment advice.</p>
@@ -195,6 +197,6 @@
   </section>
 
 </main>
-<script src="/static/app.js?v=15"></script>
+<script src="/static/app.js?v=17"></script>
 </body>
 </html>

@@ -50,10 +50,10 @@
   const fmtDay = (d) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : '-');
   const ACT = { buy: 'Buy', wait: 'Wait', avoid: 'Avoid' };
   const VERDICT = { positive: 'positive', neutral: 'neutral', negative: 'negative', no_news: 'no news', not_checked: 'not checked', error: 'error' };
-  function sentBadge(r) {
+  function sentBadge(r, compact = false) {
     const v = r.sentiment_verdict || 'not_checked';
     const sc = r.sentiment_score;
-    const bar = sc == null ? '' : `<span class="bar"><i class="${sc >= 0 ? 'p' : 'n'}" style="width:${Math.min(Math.abs(sc), 1) * 50}%"></i></span>`;
+    const bar = sc == null || compact ? '' : `<span class="bar"><i class="${sc >= 0 ? 'p' : 'n'}" style="width:${Math.min(Math.abs(sc), 1) * 50}%"></i></span>`;
     return `<span class="badge ${v}">${VERDICT[v] || v}</span> ${sc == null ? '' : `<span class="${sc > 0 ? 'pos' : sc < 0 ? 'neg' : 'neu'}">${sc >= 0 ? '+' : ''}${fmt(sc, 2)}</span>`}${bar}`;
   }
   function headlinesCell(r, n = 3) {
@@ -159,11 +159,60 @@
       <div><h4>news (${r.sentiment_n || 0} scored of ${r.sentiment_articles || 0})</h4>${sentBadge(r)}${headlinesCell(r, 4)}</div>
     </div></div></td></tr>`;
   }
+  // ------------------------------------------------------------ live prices
+  const live = { data: null, timer: null, busy: false };
+  const istTime = (iso) => new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false, hour: '2-digit', minute: '2-digit' });
+  function priceInner(r) {
+    const q = live.data?.quotes?.[r.instrument_key];
+    if (!q) {
+      if (r.close == null) return '<span class="dim">-</span>';
+      return `<b>₹${fmt(r.close, 2)}</b><small class="sub">close ${fmtDay(r.as_of)}</small>`;
+    }
+    const chg = q.change_pct;
+    const st = q.status || {};
+    return `<b>₹${fmt(q.ltp, 2)}</b><small class="sub ${chg > 0 ? 'pos' : chg < 0 ? 'neg' : ''}">${chg == null ? '' : `${chg >= 0 ? '+' : ''}${fmt(chg, 2)}% today · `}${q.traded_at ? istTime(q.traded_at) : ''}</small>`
+      + (st.text ? `<span class="lst ${st.code}">${esc(st.text)}</span>` : '');
+  }
+  const priceCell = (r) => `<td class="num lp" data-lp="${esc(r.instrument_key)}">${priceInner(r)}</td>`;
+  function paintPrices() {
+    const by = Object.fromEntries(((lastScan && lastScan.results) || []).map((r) => [r.instrument_key, r]));
+    document.querySelectorAll('td.lp[data-lp]').forEach((td) => {
+      const r = by[td.dataset.lp]; if (!r) return;
+      const html = priceInner(r);
+      if (td.innerHTML !== html) { td.innerHTML = html; td.classList.remove('flash'); void td.offsetWidth; td.classList.add('flash'); }
+    });
+    const d = live.data, el = $('#live-line'); if (!el) return;
+    const asOf = lastScan?.stats?.data_as_of;
+    if (!d) el.textContent = '';
+    else if (d.error === 'needs_login') el.innerHTML = `latest price shows the close of ${fmtDay(asOf)} — <a href="#" data-goto="settings">reconnect Upstox</a> for live prices (tokens expire at 03:30 IST daily).`;
+    else if (d.error) el.textContent = `live prices unavailable (${d.error}); latest price shows the close of ${fmtDay(asOf)}.`;
+    else el.innerHTML = `<b>latest price</b>: live from Upstox, updated ${istTime(d.fetched_at)} IST · ${d.count} stocks · `
+      + (d.market_open ? 'market open, refreshes every minute' : 'market closed, showing the last traded price')
+      + ` · buy, stop and target levels are from the scan on candles up to ${fmtDay(asOf)}.`;
+    const lc = $('#sum-price'), ls = $('#sum-price-sub');
+    if (lc) {
+      lc.textContent = d && !d.error && d.count ? istTime(d.fetched_at) : fmtDay(asOf);
+      ls.textContent = d && !d.error && d.count ? `${d.market_open ? 'live' : 'last trade'} · candles to ${fmtDay(asOf)}` : 'last close (no live prices)';
+    }
+  }
+  async function loadQuotes(force = false) {
+    if (live.busy || !lastScan?.results?.length) return;
+    live.busy = true;
+    try { live.data = await api(`/api/quotes${force ? '?force=true' : ''}`); } catch (e) { live.data = { error: e.message, quotes: {} }; }
+    live.busy = false;
+    paintPrices();
+    clearTimeout(live.timer);
+    live.timer = setTimeout(() => {
+      if (document.hidden && live.data?.market_open) return;  // resumes when the tab is visible again
+      loadQuotes();
+    }, live.data?.market_open ? 60000 : 600000);
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && live.data?.market_open) loadQuotes(); });
+
   function overviewRow(r, i) {
     return `<tr class="main r-${r.action}" data-key="${esc(r.instrument_key)}"><td>${i + 1}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td>`
-      + `${fundCell(r)}${chartCell(r)}<td class="why">${actBadge(r)}<small>${esc(r.reason || '')}</small></td>${buyWhenCell(r)}`
-      + `${levelCell(r.stop_loss, r.stop_pct, 'neg')}${levelCell(r.target, r.target_pct, 'pos')}<td>${sentBadge(r)}</td>`
-      + `<td class="num">${r.quantity || '<span class="dim">-</span>'}</td></tr>`;  // detail row is built on first open
+      + `${priceCell(r)}${fundCell(r)}${chartCell(r)}<td class="why">${actBadge(r)}<small>${esc(r.reason || '')}</small></td>${buyWhenCell(r)}`
+      + `${levelCell(r.stop_loss, r.stop_pct, 'neg')}${levelCell(r.target, r.target_pct, 'pos')}<td class="sentc">${sentBadge(r, true)}</td></tr>`;  // detail row (with quantity) is built on first open
   }
   function sentRow(r, i) {
     return `<tr class="r-${r.action}"><td>${i + 1}</td><td class="sym">${esc(r.symbol)}<small>${esc(r.name || '')}</small></td><td>${sentBadge(r)}</td>`
@@ -194,7 +243,7 @@
       ['buy now', '<span class="pos" id="sum-buy">-</span>', '<span id="sum-buy-sub"></span>'],
       ['stocks rated', `${st.universe || 0}`, `${st.gated_out ?? 0} failed quality checks`],
       ['news checked', `${st.sentiment_scored ?? 0}`, !st.sentiment_enabled ? 'no marketaux key' : st.stale ? 'from saved news' : `${st.sentiment_requests ?? 0} marketaux requests`],
-      ['data as of', st.data_as_of ? fmtDay(st.data_as_of) : '-', `scan ${new Date(scan.run_at).toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' })} ist`],
+      ['latest price', '<span id="sum-price">-</span>', '<span id="sum-price-sub"></span>'],
       ['track record', ps.trades ? `<span class="${ps.avg_ret_pct >= 0 ? 'pos' : 'neg'}">${ps.avg_ret_pct >= 0 ? '+' : ''}${fmt(ps.avg_ret_pct, 2)}%</span>` : '<span class="dim">-</span>', ps.trades ? `${ps.trades} closed · win ${ps.win_rate_pct}%` : 'no closed buys yet'],
       ['next scan', settings.schedule?.enabled && settings.schedule.next_run ? new Date(settings.schedule.next_run).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'off', settings.schedule?.enabled ? 'automatic, ist' : 'enable in settings'],
     ];
@@ -202,11 +251,15 @@
     el.innerHTML = cells.map(([k, v, b]) => `<div class="s"><div class="k">${k}</div><div class="v">${v}</div><div class="b">${b}</div></div>`).join('');
     el.classList.remove('hidden');
     updateBuyCard();
+    paintPrices();
   }
 
   // ------------------------------------------------------------ filters
-  const view = { ov: 'all', ovQ: '', ovChart: '', ovFund: '', ovStop: '3', sent: 'all', sentQ: '' };
-  try { const v = localStorage.getItem('eq_max_stop'); if (v !== null) view.ovStop = v; } catch (e) { /* storage unavailable */ }
+  const view = { ov: 'all', ovQ: '', ovChart: '', ovFund: '', ovStop: '3.5', sent: 'all', sentQ: '' };
+  try {
+    const v = localStorage.getItem('eq_max_stop_v2');
+    if (v !== null && [...$('#ov-stop').options].some((o) => o.value === v)) view.ovStop = v;
+  } catch (e) { /* storage unavailable */ }
   $('#ov-stop').value = view.ovStop;
   // Only buy/wait stocks whose stop-loss is within the chosen % of the buy price ("" = no limit).
   const stopOk = (r) => !view.ovStop || (r.action !== 'avoid' && r.entry != null && r.stop_pct != null && -r.stop_pct <= Number(view.ovStop) + 1e-9);
@@ -229,7 +282,7 @@
   $('#ov-search').addEventListener('input', (e) => { view.ovQ = e.target.value.trim().toLowerCase(); renderLists(); });
   $('#ov-stop').addEventListener('change', (e) => {
     view.ovStop = e.target.value;
-    try { localStorage.setItem('eq_max_stop', view.ovStop); } catch (err) { /* storage unavailable */ }
+    try { localStorage.setItem('eq_max_stop_v2', view.ovStop); } catch (err) { /* storage unavailable */ }
     renderLists();
   });
   $('#ov-chart').addEventListener('change', (e) => { view.ovChart = e.target.value; renderLists(); });
@@ -297,7 +350,10 @@
     renderLists();
   }
 
-  async function loadLatest() { try { renderScan(await api('/api/scan/latest')); } catch (e) { toast(e.message, true); } }
+  async function loadLatest() {
+    try { renderScan(await api('/api/scan/latest')); } catch (e) { toast(e.message, true); return; }
+    loadQuotes(true);
+  }
 
   let pollTimer, wasRunning = false;
   async function pollStatus() {

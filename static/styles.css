@@ -246,5 +246,17 @@ svg.mini text.t { fill: var(--green); } svg.mini text.s { fill: var(--red); } sv
 .dwrap { position: sticky; left: 16px; width: min(1320px, calc(100vw - 110px)); }
 td.bw small.sub { white-space: nowrap; }
 @media (max-width: 760px) { .dwrap { width: calc(100vw - 60px); left: 0; } }
-table.overview th, table.overview td { padding: 9px 8px; }
+table.overview th, table.overview td { padding: 9px 6px; }
 table.overview td.why { max-width: 240px; }
+
+/* ------------------------------------------------------------ live prices */
+td.lp { min-width: 140px; max-width: 165px; white-space: normal; }
+td.lp b { font-variant-numeric: tabular-nums; }
+td.lp small.sub { white-space: nowrap; }
+.lst { display: inline-block; margin-top: 3px; padding: 2px 6px; border-radius: 6px; font-size: 11px; line-height: 1.35; border: 1px solid var(--line); color: var(--muted); background: #fff; text-align: left; }
+.lst.active { color: #166534; background: var(--green-soft); border-color: #bbf7d0; }
+.lst.target { color: #fff; background: var(--green); border-color: var(--green); }
+.lst.stopped, .lst.below_stop, .lst.skip { color: #991b1b; background: var(--red-soft); border-color: #fecaca; }
+td.lp.flash b { animation: flash 1.2s ease; }
+@keyframes flash { from { background: #fef3c7; } to { background: transparent; } }
+td.sentc { white-space: nowrap; }

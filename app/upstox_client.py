@@ -150,3 +150,26 @@ def fetch_daily_candles(instrument_key: str, from_date: date, to_date: date, tok
 
 def default_from_date(days: int) -> date:
     return date.today() - timedelta(days=days)
+
+
+def fetch_quotes(instrument_keys: list[str], token: str) -> dict[str, dict]:
+    """Live full market quotes (last price, today's OHLC, volume) for up to 500 keys per
+    request. Returns {instrument_key: quote}; keys Upstox doesn't know are left out."""
+    out: dict[str, dict] = {}
+    keys = list(dict.fromkeys(k for k in instrument_keys if k))
+    for i in range(0, len(keys), 500):
+        _limiter.wait()
+        try:
+            resp = httpx.get(f"{UPSTOX_API_BASE}/v2/market-quote/quotes", headers=_headers(token),
+                             params={"instrument_key": ",".join(keys[i:i + 500])}, timeout=30)
+        except httpx.HTTPError as e:
+            raise UpstoxError(f"Quote request failed: {e}") from e
+        if resp.status_code in (401, 403):
+            raise AuthError("Access token rejected by Upstox - please log in again.")
+        if resp.status_code != 200:
+            raise UpstoxError(f"{resp.status_code}: {resp.text[:200]}")
+        for q in (resp.json().get("data") or {}).values():
+            key = q.get("instrument_token")
+            if key:
+                out[key] = q
+    return out

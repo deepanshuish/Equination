@@ -30,6 +30,9 @@ and grades its own past picks. It never places orders.
   bull flag and bear flag patterns with pivot, stop and measured-move target.
   A volume-confirmed breakout becomes a buy, a forming pattern a wait above
   its pivot, and a bear-flag breakdown an avoid.
+- **Live prices** in the overview from Upstox's quote API (one request for all
+  stocks), refreshed every minute while the market is open, with where each
+  stock stands against its plan: buy-stop triggered, stop-loss or target hit.
 - **Sentiment**: news sentiment for every stock, ranked, with the same stop and
   target. On Marketaux's free plan coverage builds up over a few daily scans.
 - **Backtest** of the rules on the user's downloaded history, and a
